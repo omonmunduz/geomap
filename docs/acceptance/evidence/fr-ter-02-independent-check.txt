@@ -1,0 +1,9 @@
+-[ RECORD 1 ]-------+-----------------------------------------------
+dev_objects         | 117
+independent         | 29
+app                 | 29
+independent_by_type | CROSSES_ZONES=9, NO_ZONE=3, USE_NOT_ALLOWED=17
+matched             | 29
+missed_by_app       | 0
+extra_in_app        | 0
+
