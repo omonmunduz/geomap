@@ -5,3 +5,6 @@ frontend/dist/
 *.log
 .env
 frontend/tsconfig.tsbuildinfo
+
+# секреты демо-стенда (basic auth для публичной ссылки)
+secrets/

@@ -10,7 +10,9 @@ const results = []
 const ok = (name, cond, extra = '') => { results.push([name, !!cond, extra]); console.log(`${cond ? 'PASS' : 'FAIL'}  ${name} ${extra}`) }
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ru-RU' })
+// стенд под basic auth (frontend/nginx.conf): BASIC_USER / BASIC_PASSWORD
+const httpCredentials = process.env.BASIC_PASSWORD ? { username: process.env.BASIC_USER ?? 'demo', password: process.env.BASIC_PASSWORD } : undefined
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'ru-RU', httpCredentials })
 const page = await ctx.newPage()
 const errors = []
 page.on('pageerror', e => errors.push(String(e)))
@@ -67,6 +69,30 @@ try {
   ok('Импортировать/Далее disabled', await page.getByRole('button', { name: 'Далее' }).isDisabled())
   await shot('04-import-step5-validation')
   await page.getByRole('button', { name: 'Отмена' }).click()
+
+  // 3b. Full import: green_zones_with_error.geojson into a new layer with auto-fix → «Готово»
+  const layerName = 'Зелёные зоны (проверка ' + Date.now() + ')'
+  await page.getByRole('button', { name: '+ Импорт данных' }).click()
+  await page.getByRole('button', { name: 'Создать новый слой' }).click()
+  await page.locator('.modal label.field', { hasText: 'Наименование (рус.)' }).locator('input').fill(layerName)
+  await page.locator('.modal select').first().selectOption('polygon')
+  await page.getByRole('button', { name: 'Далее' }).click()
+  await page.locator('.modal input[type=file]').setInputFiles('/w/demo-data/samples/green_zones_with_error.geojson')
+  await page.getByRole('button', { name: 'Далее' }).click()
+  await page.getByText('Исходная система координат').waitFor()
+  await page.getByRole('button', { name: 'Далее' }).click()
+  await page.locator('.modal input[type=checkbox]').check()          // «Исправлять невалидную геометрию»
+  await page.getByRole('button', { name: 'Далее' }).click()
+  await page.locator('.modal .alert-ok').waitFor({ timeout: 30000 })
+  await page.getByRole('button', { name: 'Далее' }).click()
+  await page.getByRole('button', { name: 'Импортировать' }).click()
+  let imp = ''
+  for (let i = 0; i < 20 && imp !== 'Готово'; i++) {
+    await page.waitForTimeout(1000); await page.reload()
+    imp = (await page.locator('tr', { hasText: layerName }).locator('.imp').innerText().catch(() => '')).trim()
+  }
+  ok('import green_zones_with_error.geojson (auto-fix) → Готово', imp === 'Готово', JSON.stringify(imp))
+  await shot('04b-import-done')
 
   // 4. Admin → Контроль зонирования → check for Бишкек
   await login('Администратор Геопортала')
