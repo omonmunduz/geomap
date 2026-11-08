@@ -1,0 +1,455 @@
+token citizen: ok
+token staff: ok
+token staff2: ok
+token mchs: ok
+token admin: ok
+
+### PHASE 1 — catalog and roles
+$ curl -X GET '/api/catalog/tree' [anon] → HTTP 200
+  ↳ {"themes":7,"layers":34}
+CHECK PASS  anon: 7 themes
+CHECK PASS  anon: 34 layers
+
+### FR-DAT-01 / FR-GIS-03 — point, line, polygon: create, read, edit vertices, move, delete
+created layers point=8b469311-2ebf-4ca0-b487-aa92f7aff540 line=195ca259-2c4c-49ab-be51-3a1f731afc08 polygon=19437b42-d02e-424b-b6f7-efacf9ea2ab9
+$ curl -X POST '/api/layers/8b469311-2ebf-4ca0-b487-aa92f7aff540/features' [admin] → HTTP 200
+  ↳ {"id":"93e406a4-b701-4fe9-83de-d7516b90d80c","geometryType":"POINT","title":"Точка АТ","lon":74.6,"lat":42.87}
+CHECK PASS  point saved
+$ curl -X POST '/api/layers/195ca259-2c4c-49ab-be51-3a1f731afc08/features' [admin] → HTTP 200
+  ↳ {"geometryType":"LINESTRING","lengthM":3952.1573064035824}
+CHECK PASS  line saved
+$ curl -X POST '/api/layers/19437b42-d02e-424b-b6f7-efacf9ea2ab9/features' [admin] → HTTP 200
+  ↳ {"geometryType":"POLYGON","areaM2":1815788.3169288635}
+CHECK PASS  polygon saved
+$ curl -X GET '/api/features/ba869c80-4a16-418a-9720-805dbf0d7c11' [admin] → HTTP 200
+  ↳ {"type":"Polygon","coordinates":[[[74.58,42.86],[74.6,42.86],[74.6,42.88],[74.58,42.86]]]}
+CHECK PASS  polygon read back from DB (4 vertices)
+$ curl -X PUT '/api/features/ba869c80-4a16-418a-9720-805dbf0d7c11' [admin] → HTTP 200
+CHECK PASS  polygon: vertex added (5 vertices)
+$ curl -X PUT '/api/features/93e406a4-b701-4fe9-83de-d7516b90d80c' [admin] → HTTP 200
+  ↳ {"lon":74.61,"lat":42.875}
+CHECK PASS  point moved
+$ curl -X POST '/api/layers/8b469311-2ebf-4ca0-b487-aa92f7aff540/features' [admin] → HTTP 400
+  ↳ {"error":"Тип геометрии LINESTRING не соответствует типу слоя (point)"}
+CHECK PASS  wrong geometry type rejected
+$ curl -X POST '/api/layers/8b469311-2ebf-4ca0-b487-aa92f7aff540/features' [admin] → HTTP 400
+  ↳ {"error":"Объект вне территории Кыргызской Республики"}
+CHECK PASS  point outside KR rejected
+$ curl -X DELETE '/api/features/7fff4402-6292-48f0-8e81-157ee1a8f5c7' [admin] → HTTP 200
+  ↳ {"deleted":true}
+CHECK PASS  line deleted
+$ curl -X GET '/api/features/7fff4402-6292-48f0-8e81-157ee1a8f5c7' [admin] → HTTP 403
+CHECK PASS  deleted feature no longer readable
+$ curl -X GET '/api/catalog/layers/19437b42-d02e-424b-b6f7-efacf9ea2ab9?' [admin] → HTTP 200
+  ↳ {"draftVersion":1,"publishedVersion":null,"status":"draft"}
+
+### FR-DAT-08 — CRUD with audit and rights; links
+$ curl -X PUT '/api/features/93e406a4-b701-4fe9-83de-d7516b90d80c' [staff] → HTTP 403
+  ↳ {"error":"Слой принадлежит другой организации"}
+CHECK PASS  staff of another org cannot edit (403)
+$ curl -X POST '/api/layers/8b469311-2ebf-4ca0-b487-aa92f7aff540/features' [citizen] → HTTP 403
+CHECK PASS  citizen cannot create (403)
+$ curl -X DELETE '/api/features/93e406a4-b701-4fe9-83de-d7516b90d80c' [anon] → HTTP 401
+CHECK PASS  anonymous cannot delete (401)
+$ curl -X PUT '/api/features/93e406a4-b701-4fe9-83de-d7516b90d80c' [admin] → HTTP 200
+  ↳ {"title":"Точка АТ (изменена)"}
+$ curl -X GET '/api/features/93e406a4-b701-4fe9-83de-d7516b90d80c/history' [admin] → HTTP 200
+  ↳ [{"op":"update","author":"Администратор Геопортала","at":"2026-11-08T16:40:26.768+00:00"},{"op":"update","author":"Администратор Геопортала","at":"2026-11-08T16:40:26.603+00:00"},{"op":"create","author":"Администратор Геопортала","at":"2026-11-08T16:40:26.460+00:00"}]
+CHECK PASS  history has create + 2 updates
+$ curl -X GET '/api/admin/audit?limit=50' [admin] → HTTP 200
+  ↳ [{"action":"feature_update","userName":"Администратор Геопортала","objectId":"93e406a4-b701-4fe9-83de-d7516b90d80c"},{"action":"feature_delete","userName":"Администратор Геопортала","objectId":"7fff4402-6292-48f0-8e81-157ee1a8f5c7"},{"action":"feature_update","userName":"Администратор Геопортала","objectId":"93e406a4-b701-4fe9-83
+CHECK PASS  audit has feature_create/update/delete
+$ curl -X GET '/api/features/93e406a4-b701-4fe9-83de-d7516b90d80c/links' [admin] → HTTP 404
+  links endpoint: HTTP 404 (no relation model in schema)
+
+### FR-DAT-03 — attachments (image + scan) on a zoning discrepancy; on an ordinary feature
+$ curl -X GET '/api/zoning/discrepancies' [admin] → HTTP 200
+$ curl -X POST '/api/zoning/discrepancies/48a768de-fe2b-47d1-b9cd-84a1b44f3fb0/status' [admin] → HTTP 200
+CHECK PASS  attach image → 200
+$ curl -X POST '/api/zoning/discrepancies/48a768de-fe2b-47d1-b9cd-84a1b44f3fb0/status' [admin] → HTTP 200
+CHECK PASS  attach scan → 200
+$ curl -X GET '/api/zoning/discrepancies/48a768de-fe2b-47d1-b9cd-84a1b44f3fb0' [admin] → HTTP 200
+  ↳ [{"id":31,"toStatus":"in_review","comment":"Скан акта","attachmentName":"scan.pdf"},{"id":30,"toStatus":"in_review","comment":"Фото с выезда","attachmentName":"photo.png"},{"id":1,"toStatus":"new","comment":"Выявлено автоматической проверкой","attachmentName":null}]
+$ curl '/api/zoning/discrepancies/48a768de-fe2b-47d1-b9cd-84a1b44f3fb0/attachments/30' [admin] → HTTP 200
+CHECK PASS  download photo.png identical
+$ curl '/api/zoning/discrepancies/48a768de-fe2b-47d1-b9cd-84a1b44f3fb0/attachments/31' [admin] → HTTP 200
+CHECK PASS  download scan.pdf identical
+$ curl -X POST '/api/features/93e406a4-b701-4fe9-83de-d7516b90d80c/attachments' [admin] → HTTP 404
+  feature attachment endpoint: HTTP 404
+CHECK PASS  no attachments for ordinary features (gap confirmed)
+
+### FR-GIS-07 / FR-DAT-04 — import every supported format via the API (batch upload)
+target layer 9791492d-a7cc-4910-b78a-0adf9c72a4e2
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"hospitals_kyrg06_zone3.zip","ogrLayer":"hospitals","featureCount":4,"geometryType":"Point","detectedSrid":7694,"fields":3}
+CHECK PASS  upload hospitals_kyrg06_zone3.zip
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements.gpkg","ogrLayer":"ne_10m_populated_places_simple","featureCount":14,"geometryType":"Point","detectedSrid":4326,"fields":4}
+CHECK PASS  upload settlements.gpkg
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements.kml","ogrLayer":"ne_10m_populated_places_simple","featureCount":14,"geometryType":"Geometry","detectedSrid":4326,"fields":15}
+CHECK PASS  upload settlements.kml
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements.kmz","ogrLayer":"ne_10m_populated_places_simple","featureCount":14,"geometryType":"Geometry","detectedSrid":4326,"fields":15}
+CHECK PASS  upload settlements.kmz
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements_tab.zip","ogrLayer":"settlements","featureCount":14,"geometryType":"Point","detectedSrid":null,"fields":4}
+CHECK PASS  upload settlements_tab.zip
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements_mif.zip","ogrLayer":"settlements","featureCount":14,"geometryType":"Geometry","detectedSrid":null,"fields":4}
+CHECK PASS  upload settlements_mif.zip
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements.gdb.zip","ogrLayer":"ne_10m_populated_places_simple","featureCount":14,"geometryType":"Point","detectedSrid":4326,"fields":4}
+CHECK PASS  upload settlements.gdb.zip
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements.csv","ogrLayer":"settlements","featureCount":14,"geometryType":"Point","detectedSrid":null,"fields":4}
+CHECK PASS  upload settlements.csv
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"settlements.gml","ogrLayer":"ne_10m_populated_places_simple","featureCount":14,"geometryType":"Point","detectedSrid":4326,"fields":7}
+CHECK PASS  upload settlements.gml
+$ curl -X POST '/api/imports?layerId=9791492d-a7cc-4910-b78a-0adf9c72a4e2' [admin] → HTTP 200
+  ↳ {"fileName":"green_zones_with_error.geojson","ogrLayer":"green_zones_with_error","featureCount":2,"geometryType":"Polygon","detectedSrid":4326,"fields":1}
+CHECK PASS  upload green_zones_with_error.geojson
+
+### FR-GIS-07 / FR-TER-01 — Kyrg-06 zone 3 reprojection: hospitals into a layer without required fields
+$ curl -X POST '/api/imports?layerId=fc49845e-4d9f-4c74-8d9f-ec826df6671e' [admin] → HTTP 200
+  ↳ {"detectedSrid":7694,"detectedSrsName":"Kyrg-06 / zone 3","featureCount":4}
+$ curl -X POST '/api/imports/f3150b9a-f208-4909-ad0e-fbb3b1a1b93a/validate' [admin] → HTTP 200
+  ↳ {"blocking":false,"total":4,"valid":4,"bbox":[74.5321,42.84109999999999,74.6401,42.8902]}
+CHECK PASS  hospitals (no required fields) validate OK
+$ curl -X POST '/api/imports/f3150b9a-f208-4909-ad0e-fbb3b1a1b93a/commit' [admin] → HTTP 200
+CHECK PASS  hospitals import done
+$ curl -X GET '/api/catalog/layers/fc49845e-4d9f-4c74-8d9f-ec826df6671e' [admin] → HTTP 200
+  ↳ [74.5321,42.84109999999999,74.6401,42.8902]
+CHECK PASS  reprojected bbox lies in Bishkek (lon 74.4–74.8)
+
+### FR-DAT-12 / FR-GIS-07 — defective data: missing required field, self-intersection, errors CSV
+$ curl -X GET '/api/my/layers' [staff] → HTTP 200
+$ curl -X POST '/api/imports?layerId=71927fe9-d2d4-4652-8f35-17f388dc1210' [staff] → HTTP 200
+$ curl -X POST '/api/imports/e5c57057-a18c-47c9-915d-7e44bee6f383/validate' [staff] → HTTP 200
+  ↳ {"blocking":true,"total":4,"valid":3,"errors":[{"message":"не заполнено обязательное поле «Наименование»","fid":3}]}
+CHECK PASS  missing «Наименование» → blocking
+$ curl -X POST '/api/imports/e5c57057-a18c-47c9-915d-7e44bee6f383/commit' [staff] → HTTP 409
+  ↳ {"error":"Импорт возможен только после успешной проверки данных"}
+CHECK PASS  commit of invalid import refused (409)
+$ curl -X GET '/api/imports/e5c57057-a18c-47c9-915d-7e44bee6f383' [staff] → HTTP 200
+  ↳ {"status":"invalid"}
+$ curl -X POST '/api/imports?layerId=7a438eb1-431d-4edf-bdac-ddd56f857cf1' [admin] → HTTP 200
+$ curl -X POST '/api/imports/5d23a212-79d1-47ba-875b-cf875aa0f190/validate' [admin] → HTTP 200
+  ↳ {"blocking":true,"total":2,"valid":1,"errors":[{"message":"невалидная геометрия: самопересечение контура полигона[74.5925 42.862]","fid":2}]}
+CHECK PASS  self-intersection → blocking
+$ curl '/api/imports/5d23a212-79d1-47ba-875b-cf875aa0f190/errors.csv' [admin] → HTTP 200
+  ↳ ﻿уровень;объект;сообщение|ошибка;2;невалидная геометрия: самопересечение контура полигона[74.5925 42.862]|
+CHECK PASS  errors CSV produced
+$ curl -X POST '/api/imports/5d23a212-79d1-47ba-875b-cf875aa0f190/validate' [admin] → HTTP 200
+  ↳ {"blocking":false,"total":2,"valid":2,"warnings":[{"message":"невалидная геометрия: самопересечение контура полигона[74.5925 42.862] — будет исправлена автоматически (ST_MakeValid)","fid":2}]}
+CHECK PASS  with makeValid: not blocking, 2 valid
+$ curl -X POST '/api/imports/5d23a212-79d1-47ba-875b-cf875aa0f190/commit' [admin] → HTTP 200
+$ curl -X GET '/api/catalog/tree' [anon] → HTTP 200
+CHECK PASS  imported draft NOT public before publish
+$ curl -X POST '/api/layers/7a438eb1-431d-4edf-bdac-ddd56f857cf1/publish' [admin] → HTTP 200
+  ↳ {"status":"published","publishedVersion":1}
+CHECK PASS  published after explicit action
+  job statuses allowed by schema: uploaded, validated, invalid, queued, running, done, failed, cancelled (no 'quarantine')
+
+### FR-DAT-05 — registries: layer list and discrepancy registry with search/filters
+$ curl -X GET '/api/my/layers' [staff] → HTTP 200
+  ↳ [{"titleRu":"Больницы и медицинские учреждения","status":"empty","lastImport":"invalid"}]
+CHECK PASS  staff sees only own-org layers
+$ curl -X GET '/api/zoning/discrepancies?type=NO_ZONE' [admin] → HTTP 200
+  ↳ [{"objectTitle":"ОБ-0163","type":"NO_ZONE","status":"new"},{"objectTitle":"ОБ-0168","type":"NO_ZONE","status":"new"},{"objectTitle":"ОБ-0170","type":"NO_ZONE","status":"new"}]
+CHECK PASS  filter type=NO_ZONE → 3
+$ curl -X GET '/api/zoning/discrepancies?status=in_review' [admin] → HTTP 200
+  ↳ [{"objectTitle":"ОБ-0018","status":"in_review"}]
+CHECK PASS  filter status=in_review → 1
+
+### FR-DAT-10 — metadata
+$ curl -X GET '/api/catalog/layers/bb33f5a0-981f-491b-a3be-97e711bd76ce' [anon] → HTTP 200
+  ↳ {"abstract":"Местоположение и наименования населённых пунктов (ru/ky), численность населения.","keywords":null,"lineage":null,"updateFreq":"не реже 1 раза в квартал","contact":"Госкартография"}
+CHECK PASS  metadata has abstract/updateFreq/contact
+$ curl -X PATCH '/api/layers/bb33f5a0-981f-491b-a3be-97e711bd76ce' [admin] → HTTP 200
+  ↳ {"description":"Обновлённая аннотация (АТ)"}
+  no metadata editing endpoint (ISO 19115 elements: identification, extent, quality, distribution…) — only description/titles/access/colour
+
+### FR-GIS-06 — internal layer via MVT; external WFS / WFS-T
+$ curl '/api/tiles/7bfbe3af-3596-47c5-8fb7-dc746806bf55/5/22/11.pbf' [anon] → HTTP 200, 1510 bytes
+CHECK PASS  internal MVT tile non-empty
+$ curl -X GET '/wfs?service=WFS&request=GetCapabilities' [anon] → HTTP 404
+$ curl -X GET '/api/wfs?service=WFS&request=GetCapabilities' [anon] → HTTP 401
+$ curl -X GET '/geoserver/wfs' [anon] → HTTP 404
+  no WFS client/server and no external-layer registration endpoint in the code
+
+### FR-SRCH-01 — full-text search, ru/ky corpus
+$ curl -X GET '/api/search?q=%D0%B1%D0%B8%D1%88%D0%BA&limit=3' [anon] → HTTP 200
+  ↳ {"q":"бишк","total":26,"top":["Бишкек / Населённые пункты","Бишкек / АТД: области и города республиканского значения","БШК-З-01 / Зоны застройки (утверждённое зонирование)"]}
+$ curl -X GET '/api/search?q=%D0%91%D0%B8%D1%88%D0%BA%D0%B5%D0%BA&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Бишкек","total":26,"top":["Бишкек / Населённые пункты","Бишкек / АТД: области и города республиканского значения","БШК-З-01 / Зоны застройки (утверждённое зонирование)"]}
+$ curl -X GET '/api/search?q=%D0%91%D0%B8%D1%88%D0%BA%D0%B5%D0%BA%D0%B5&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Бишкеке","total":0,"top":[]}
+$ curl -X GET '/api/search?q=%D1%87%D1%83%D0%B9&limit=3' [anon] → HTTP 200
+  ↳ {"q":"чуй","total":1,"top":["Чуйская область / АТД: области и города республиканского значения"]}
+$ curl -X GET '/api/search?q=%D0%A7%D2%AF%D0%B9&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Чүй","total":0,"top":[]}
+$ curl -X GET '/api/search?q=%D0%9E%D0%91-0001&limit=3' [anon] → HTTP 200
+  ↳ {"q":"ОБ-0001","total":1,"top":["ОБ-0001 / Текущее освоение территории"]}
+$ curl -X GET '/api/search?q=%D0%9E%D1%88&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Ош","total":3,"top":["Ош / АТД: области и города республиканского значения","Ош / Населённые пункты"," / АТ зелёные зоны"]}
+$ curl -X GET '/api/search?q=%D0%9A%D0%B0%D1%80%D0%B0%D0%BA%D0%BE%D0%BB&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Каракол","total":1,"top":["Каракол / Населённые пункты"]}
+$ curl -X GET '/api/search?q=%D0%9D%D0%B0%D1%80%D1%8B%D0%BD&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Нарын","total":2,"top":["Нарын / Населённые пункты","Нарынская область / АТД: области и города республиканского значения"]}
+$ curl -X GET '/api/search?q=Tokmak&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Tokmak","total":1,"top":["Токмок / Населённые пункты"]}
+$ curl -X GET '/api/search?q=%D0%BA%D0%B0%D0%B4%D0%B0%D1%81%D1%82%D1%80&limit=3' [anon] → HTTP 200
+  ↳ {"q":"кадастр","total":0,"top":[]}
+$ curl -X GET '/api/search?q=%D0%91%D0%B8%D1%88%D0%BA%D0%B5%D0%BA%20%D1%88%D0%B0%D0%B0%D1%80%D1%8B&limit=3' [anon] → HTTP 200
+  ↳ {"q":"Бишкек шаары","total":0,"top":[]}
+
+### FR-SRCH-02 — spatial search: rectangle, polygon contour, results inside
+$ curl -X POST '/api/search/area' [anon] → HTTP 200
+  ↳ {"total":171,"first":"Бишкек"}
+CHECK PASS  rectangle: all results inside
+$ curl -X POST '/api/search/area' [anon] → HTTP 200
+  ↳ {"total":88}
+  triangle contour accepted by API: 88 objects (rectangle: 171) — UI only offers a rectangle; no centre/buffer search
+
+### FR-SRCH-05 / FR-PUB-02 — restricted data and the role matrix
+$ curl -X POST '/api/layers/48395d51-e679-4e13-98fc-a9a3ead54379/features' [admin] → HTTP 200
+$ curl -X GET '/api/search?q=%D0%A1%D0%B5%D0%BA%D1%80%D0%B5%D1%82%D0%BD%D1%8B%D0%B9%D0%BE%D0%B1%D1%8A%D0%B5%D0%BA%D1%82' [anon] → HTTP 200
+  ↳ {"total":0}
+CHECK PASS  search restricted as anon
+$ curl -X GET '/api/search?q=%D0%A1%D0%B5%D0%BA%D1%80%D0%B5%D1%82%D0%BD%D1%8B%D0%B9%D0%BE%D0%B1%D1%8A%D0%B5%D0%BA%D1%82' [citizen] → HTTP 200
+  ↳ {"total":0}
+CHECK PASS  search restricted as citizen
+$ curl -X GET '/api/search?q=%D0%A1%D0%B5%D0%BA%D1%80%D0%B5%D1%82%D0%BD%D1%8B%D0%B9%D0%BE%D0%B1%D1%8A%D0%B5%D0%BA%D1%82' [staff] → HTTP 200
+  ↳ {"total":1}
+CHECK PASS  search restricted as staff
+$ curl -X GET '/api/search?q=%D0%A1%D0%B5%D0%BA%D1%80%D0%B5%D1%82%D0%BD%D1%8B%D0%B9%D0%BE%D0%B1%D1%8A%D0%B5%D0%BA%D1%82' [admin] → HTTP 200
+  ↳ {"total":1}
+CHECK PASS  search restricted as admin
+$ curl -X GET '/api/features/e6322533-b25c-4dc9-95e7-2e2060907e97' [anon] → HTTP 403
+CHECK PASS  restricted feature card as anon
+$ curl '/api/tiles/48395d51-e679-4e13-98fc-a9a3ead54379/14/11587/6028.pbf' [anon] → HTTP 403
+CHECK PASS  restricted tile as anon
+$ curl -X GET '/api/catalog/layers/48395d51-e679-4e13-98fc-a9a3ead54379' [anon] → HTTP 403
+CHECK PASS  restricted layer card as anon
+$ curl -X GET '/api/features/e6322533-b25c-4dc9-95e7-2e2060907e97' [citizen] → HTTP 403
+CHECK PASS  restricted feature card as citizen
+$ curl '/api/tiles/48395d51-e679-4e13-98fc-a9a3ead54379/14/11587/6028.pbf' [citizen] → HTTP 403
+CHECK PASS  restricted tile as citizen
+$ curl -X GET '/api/catalog/layers/48395d51-e679-4e13-98fc-a9a3ead54379' [citizen] → HTTP 403
+CHECK PASS  restricted layer card as citizen
+$ curl -X GET '/api/features/e6322533-b25c-4dc9-95e7-2e2060907e97' [staff] → HTTP 200
+CHECK PASS  restricted feature card as staff
+$ curl '/api/tiles/48395d51-e679-4e13-98fc-a9a3ead54379/14/11587/6028.pbf' [staff] → HTTP 200
+CHECK PASS  restricted tile as staff
+$ curl -X GET '/api/catalog/layers/48395d51-e679-4e13-98fc-a9a3ead54379' [staff] → HTTP 200
+CHECK PASS  restricted layer card as staff
+  role matrix (HTTP status):
+  endpoint                                 anon  citizen  staff  admin
+  GET /api/catalog/tree                     200    200    200    200
+  GET /api/my/layers                        401    403    200    200
+  GET /api/zoning/discrepancies             401    403    200    200
+  GET /api/admin/users                      401    403    403    200
+  GET /api/admin/audit                      401    403    403    200
+  POST /api/layers                          401    403    400    400
+  GET /api/imports/00000000-0000-0000-0000-000000000000    401    403    404    404
+  catalog layers visible to anon: 40
+  catalog layers visible to citizen: 40
+  catalog layers visible to staff: 44
+  catalog layers visible to admin: 44
+
+### FR-CFG-01 — layer style
+$ curl -X PATCH '/api/layers/8b469311-2ebf-4ca0-b487-aa92f7aff540' [admin] → HTTP 200
+  ↳ {"style":{"color":"#ff0000"}}
+CHECK PASS  style colour changed
+  no min/max zoom (visibility scale) fields in catalog.layers or LayerPatch
+
+### FR-CFG-04 / FR-TER-02 — rules dictionary, change rule and re-run check
+$ curl -X GET '/api/zoning/territories' [admin] → HTTP 200
+$ curl -X POST '/api/zoning/checks' [admin] → HTTP 200
+  ↳ {"objectsChecked":117,"discrepancies":29,"byType":{"CROSSES_ZONES":9,"NO_ZONE":3,"USE_NOT_ALLOWED":17},"newDiscrepancies":0,"checkId":"22c64b71-18ef-456d-94ec-bdae0b4c312e","territoryName":"Бишкек"}
+CHECK PASS  re-run: 117 checked, 29 discrepancies, 0 new
+$ curl -X PUT '/api/admin/zoning-rules' [admin] → HTTP 200
+  ↳ 42
+$ curl -X POST '/api/zoning/checks' [admin] → HTTP 200
+  ↳ {"objectsChecked":117,"discrepancies":26,"byType":{"CROSSES_ZONES":9,"NO_ZONE":3,"USE_NOT_ALLOWED":14}}
+CHECK PASS  allowing agriculture in residential lowers count
+$ curl -X POST '/api/zoning/checks' [admin] → HTTP 200
+  ↳ {"discrepancies":29,"byType":{"CROSSES_ZONES":9,"NO_ZONE":3,"USE_NOT_ALLOWED":17}}
+CHECK PASS  rule restored → 29 again
+$ curl -X GET '/api/admin/dictionaries' [admin] → HTTP 404
+  generic dictionaries endpoint: HTTP 404
+
+### FR-AUTH-01/02/03/06, FR-ADM-01 — login, employment check, block, journal
+$ curl -X POST '/api/auth/dev-login' [anon] → HTTP 200
+  ↳ {"id":"a1519af2-fe24-476b-b9ac-d8aa1e13b65d","name":"Азамат Гражданин","role":"authorized","orgId":null,"orgCode":null,"orgName":null,"admin":false,"staff":false}
+CHECK PASS  Түндүк (emulated) citizen → role authorized
+$ curl -X POST '/api/auth/dev-login' [anon] → HTTP 200
+  ↳ {"id":"2f09adb7-b634-4cce-a1d5-ce85d338d096","name":"Динара Мамытова","role":"staff","orgId":"20207253-5af2-49d4-a0e7-7ec5427f9eb9","orgCode":"minzdrav","orgName":"Минздрав","admin":false,"staff":true}
+CHECK PASS  Infocom ID (emulated) staff → org from employment registry
+$ curl -X POST '/api/auth/dev-login' [anon] → HTTP 403
+  ↳ {"error":"Доступ к служебному контуру недоступен для вашей учётной записи. Обратитесь к администратору Геопортала"}
+CHECK PASS  is_active=false in registry → 403
+$ curl -X GET '/api/admin/users' [admin] → HTTP 200
+  ↳ [{"displayName":"Администратор Геопортала","role":"admin","status":"active","org":"Земагентство","position":"Администратор системы"},{"displayName":"Азамат Гражданин","role":"authorized","status":"active","org":null,"position":"Гражданин"},{"displayName":"Айгерим Садыкова","role":"staff","status":"active"
+$ curl -X PATCH '/api/admin/users/2f09adb7-b634-4cce-a1d5-ce85d338d096' [admin] → HTTP 200
+  ↳ {"id":"2f09adb7-b634-4cce-a1d5-ce85d338d096","displayName":"Динара Мамытова","role":"staff","status":"blocked"}
+$ curl -X POST '/api/auth/dev-login' [anon] → HTTP 403
+  ↳ {"error":"Учётная запись заблокирована администратором"}
+CHECK PASS  blocked user cannot log in
+$ curl -X PATCH '/api/admin/users/2f09adb7-b634-4cce-a1d5-ce85d338d096' [admin] → HTTP 200
+  ↳ {"id":"2f09adb7-b634-4cce-a1d5-ce85d338d096","displayName":"Динара Мамытова","role":"admin","status":"active"}
+CHECK PASS  admin assigns role
+$ curl -X POST '/api/admin/users' [admin] → HTTP 405
+  create user endpoint: HTTP 405
+$ curl -X DELETE '/api/admin/users/2f09adb7-b634-4cce-a1d5-ce85d338d096' [admin] → HTTP 405
+  delete user endpoint: HTTP 405
+$ curl -X GET '/api/admin/audit?limit=200' [admin] → HTTP 200
+  ↳ [{"action":"user_update","outcome":"success","userName":"Администратор Геопортала","details":{"to":"staff/null","from":"admin/active"}},{"action":"user_update","outcome":"success","userName":"Администратор Геопортала","details":{"to":"admin/null","from":"staff/active"}},{"action":"user_update","outcome":"success","userName":"Администратор 
+CHECK PASS  journal: login with provider
+CHECK PASS  journal: denied login
+CHECK PASS  journal: block/role change
+CHECK PASS  journal: logout event (expected absent)
+
+### FR-ADM-02 — usage statistics
+$ curl -X GET '/api/admin/stats' [admin] → HTTP 200
+  ↳ {"users":6,"layers":44,"publishedLayers":9,"publishedFeatures":331,"imports":20,"discrepancies":29,"events24h":49,"denied24h":2}
+$ curl -X GET '/api/admin/stats?format=xlsx' [admin] → HTTP 400
+  content-type: 0000000   { (JSON — no Excel export)
+
+### FR-TER-01 — zoning + current development layers
+$ curl -X GET '/api/catalog/layers/17ed0f48-538a-4951-a08f-635803b96251' [anon] → HTTP 200
+  ↳ {"titleRu":"Зоны застройки (утверждённое зонирование)","publishedVersion":1,"bbox":[74.5,42.835,74.68,42.907000000000004]}
+$ curl -X GET '/api/catalog/layers/7a876271-1c80-4784-9fa2-ff714f4bbace' [anon] → HTTP 200
+  ↳ {"titleRu":"Текущее освоение территории","publishedVersion":1,"bbox":[74.504741,42.827114,74.678216,42.905088]}
+
+### FR-TER-03 / FR-TER-04 — registry record, status history, filters
+$ curl -X GET '/api/zoning/discrepancies/48a768de-fe2b-47d1-b9cd-84a1b44f3fb0' [admin] → HTTP 200
+  ↳ {"objectTitle":"ОБ-0018","typeLabel":"Использование не соответствует зоне","responsibleOrg":"Минархстрой","statusLabel":"На рассмотрении","history":[{"fromStatus":"in_review","toStatus":"in_review","byName":"Администратор Геопортала","at":"2026-11-08T16:40:26.927+00:00"},{"fromStatus":"new","toStatus":"in_review","by
+CHECK PASS  record has object/type/responsible
+CHECK PASS  history entries have author+time
+$ curl -X GET '/api/zoning/discrepancies?type=CROSSES_ZONES' [admin] → HTTP 200
+  ↳ {"n":9,"types":["CROSSES_ZONES"],"statuses":["new"]}
+$ curl -X GET '/api/zoning/discrepancies?type=USE_NOT_ALLOWED' [admin] → HTTP 200
+  ↳ {"n":17,"types":["USE_NOT_ALLOWED"],"statuses":["in_review","new"]}
+$ curl -X GET '/api/zoning/discrepancies?status=new' [admin] → HTTP 200
+  ↳ {"n":28,"types":["CROSSES_ZONES","NO_ZONE","USE_NOT_ALLOWED"],"statuses":["new"]}
+$ curl -X GET '/api/zoning/discrepancies?territoryId=e8bea542-e300-4ffc-a12e-e432adbbcf7c' [admin] → HTTP 200
+  ↳ {"n":29,"types":["CROSSES_ZONES","NO_ZONE","USE_NOT_ALLOWED"],"statuses":["in_review","new"]}
+$ curl -X GET '/api/zoning/discrepancies?territoryId=e8bea542-e300-4ffc-a12e-e432adbbcf7c&type=NO_ZONE&status=new' [admin] → HTTP 200
+  ↳ {"n":3,"types":["NO_ZONE"],"statuses":["new"]}
+
+### FR-TER-05 / FR-RPT-01 — report for a territory, matches registry
+$ curl '/api/zoning/report?format=xlsx&territoryId=e8bea542-e300-4ffc-a12e-e432adbbcf7c' [admin] → HTTP 200, 7586 bytes
+$ curl '/api/zoning/report?format=pdf&territoryId=e8bea542-e300-4ffc-a12e-e432adbbcf7c' [admin] → HTTP 200, 46239 bytes
+$ curl '/api/zoning/report?format=xlsx&territoryId=e8bea542-e300-4ffc-a12e-e432adbbcf7c&type=NO_ZONE' [admin] → HTTP 200 (filtered selection)
+
+### FR-TER-07 — create zone with permitted use, change boundary, history
+$ curl -X POST '/api/layers/17ed0f48-538a-4951-a08f-635803b96251/features' [staff2] → HTTP 200
+  ↳ {"id":"bb2e12fd-7e04-47d5-9cd1-1af19b6bf7c6","title":"АТ-З-01","attributes":[{"label":"Код зоны","value":"АТ-З-01"},{"label":"Вид разрешённого использования","value":"Рекреационная"},{"label":"Наименование зоны","value":"Зона АТ"},{"label":"Утверждающий документ","value":"Решение №1"}]}
+CHECK PASS  zone created by Минархстрой
+$ curl -X PUT '/api/features/bb2e12fd-7e04-47d5-9cd1-1af19b6bf7c6' [staff2] → HTTP 200
+CHECK PASS  zone boundary changed
+$ curl -X GET '/api/features/bb2e12fd-7e04-47d5-9cd1-1af19b6bf7c6/history' [staff2] → HTTP 200
+  ↳ [{"op":"update","author":"Айгерим Садыкова","at":"2026-11-08T16:40:30.733+00:00"},{"op":"create","author":"Айгерим Садыкова","at":"2026-11-08T16:40:30.702+00:00"}]
+$ curl -X GET '/api/catalog/layers/17ed0f48-538a-4951-a08f-635803b96251' [staff2] → HTTP 200
+  ↳ {"draftVersion":2,"publishedVersion":1,"versions":[{"version":2,"author":"Айгерим Садыкова","createdAt":"2026-11-08T16:40:30.702+00:00","source":"редактор геометрии"},{"version":1,"author":"Система (первичное наполнение)","createdAt":"2026-11-08T16:40:21.100+00:00","source":"urban_zones.geojson"}]}
+
+### FIX-1 — copy-on-write: staff edits go to a draft; publish shows them; rollback removes them
+$ curl -X GET '/api/catalog/layers/17ed0f48-538a-4951-a08f-635803b96251' [staff2] → HTTP 200
+  urban_zones published version: v1
+  baseline zoning check: {"d":29,"t":{"CROSSES_ZONES":9,"NO_ZONE":3,"USE_NOT_ALLOWED":17}}
+  -- add: a zone over a NO_ZONE object
+$ curl -X GET '/api/zoning/discrepancies?type=NO_ZONE&territoryId=e8bea542-e300-4ffc-a12e-e432adbbcf7c' [admin] → HTTP 200
+  zone over ОБ-0163; anonymous tile 14/11587/6030 md5 5c3a79f417c1
+$ curl -X POST '/api/layers/17ed0f48-538a-4951-a08f-635803b96251/features' [staff2] → HTTP 200
+  ↳ {"id":"be4a1baf-067c-41bb-b281-acb0997ad8d5","version":3,"title":"ATZONAKOW1"}
+CHECK PASS  add: saved into a new draft version (> v1, = layer draft)
+$ curl -X GET '/api/my/layers' [staff2] → HTTP 200
+CHECK PASS  add: «Мои слои» status published_with_draft
+CHECK PASS  add: anonymous feature card → 403
+CHECK PASS  add: anonymous search → 0
+CHECK PASS  add: anonymous tile unchanged
+CHECK PASS  add: zoning check unchanged
+$ curl -X POST '/api/layers/17ed0f48-538a-4951-a08f-635803b96251/publish' [staff2] → HTTP 200
+  ↳ {"publishedVersion":3,"draftVersion":3,"status":"published"}
+CHECK PASS  add+publish: anonymous feature card → 200
+CHECK PASS  add+publish: anonymous search → 1
+CHECK PASS  add+publish: anonymous tile changed
+  zoning check after publish: {"d":28,"t":{"CROSSES_ZONES":9,"NO_ZONE":2,"USE_NOT_ALLOWED":17}}
+CHECK PASS  add+publish: zoning check picks up the zone (NO_ZONE −1)
+$ curl -X POST '/api/layers/17ed0f48-538a-4951-a08f-635803b96251/rollback/1' [staff2] → HTTP 200
+  ↳ {"publishedVersion":1,"draftVersion":1}
+CHECK PASS  add+rollback: anonymous feature card → 403
+CHECK PASS  add+rollback: anonymous search → 0
+CHECK PASS  add+rollback: anonymous tile back to original
+CHECK PASS  add+rollback: zoning check back to baseline
+  -- edit: change code and zone type of an existing zone (БШК-З-10, contains ОБ-0018)
+$ curl -X GET '/api/features/14218d2e-0767-48ee-9f4b-0e90ae6ed7b0' [staff2] → HTTP 200
+$ curl -X PUT '/api/features/14218d2e-0767-48ee-9f4b-0e90ae6ed7b0' [staff2] → HTTP 200
+  ↳ {"id":"6fd25f18-79be-4218-9c36-d2a5e5857e97","version":4,"title":"ATZONAKOW2"}
+CHECK PASS  edit: saved into a new draft version (> v1, = layer draft)
+CHECK PASS  edit: published object keeps its code for anonymous
+CHECK PASS  edit: anonymous search for new code → 0
+CHECK PASS  edit: anonymous tile unchanged
+CHECK PASS  edit: zoning check unchanged
+CHECK PASS  edit again by the published id hits the same draft object
+$ curl -X GET '/api/features/6fd25f18-79be-4218-9c36-d2a5e5857e97/history' [staff2] → HTTP 200
+  ↳ [{"op":"update","version":4,"author":"Айгерим Садыкова"},{"op":"update","version":4,"author":"Айгерим Садыкова"}]
+CHECK PASS  history records the version
+CHECK PASS  edit+publish: anonymous search for new code → 1
+CHECK PASS  edit+publish: anonymous tile changed
+  zoning check after publish: {"d":31,"t":{"CROSSES_ZONES":9,"NO_ZONE":3,"USE_NOT_ALLOWED":19}}
+CHECK PASS  edit+publish: zoning check result changed
+CHECK PASS  edit+rollback: anonymous search for new code → 0
+CHECK PASS  edit+rollback: anonymous tile back to original
+CHECK PASS  edit+rollback: zoning check back to baseline
+  -- delete: remove an existing zone (БШК-З-10)
+$ curl -X DELETE '/api/features/14218d2e-0767-48ee-9f4b-0e90ae6ed7b0' [staff2] → HTTP 200
+  ↳ {"deleted":true}
+CHECK PASS  delete: anonymous feature card still 200
+CHECK PASS  delete: anonymous search still finds it
+CHECK PASS  delete: anonymous tile unchanged
+CHECK PASS  delete: zoning check unchanged
+CHECK PASS  delete+publish: anonymous search → 0
+CHECK PASS  delete+publish: anonymous tile changed
+  zoning check after publish: {"d":33,"t":{"CROSSES_ZONES":9,"NO_ZONE":9,"USE_NOT_ALLOWED":15}}
+CHECK PASS  delete+publish: zoning check picks it up (NO_ZONE grows)
+CHECK PASS  delete+rollback: anonymous search → 1
+CHECK PASS  delete+rollback: anonymous tile back to original
+CHECK PASS  delete+rollback: zoning check back to baseline
+  -- registry stability: edit + publish the development layer, then re-run the check
+$ curl -X GET '/api/features/b72f53c3-7989-4119-b671-775b0e29190d' [admin] → HTTP 200
+$ curl -X POST '/api/zoning/checks' [admin] → HTTP 200
+  ↳ {"discrepancies":29,"newDiscrepancies":0}
+CHECK PASS  dev layer re-published: same discrepancies, 0 new (no duplicates)
+$ curl -X GET '/api/zoning/discrepancies?territoryId=e8bea542-e300-4ffc-a12e-e432adbbcf7c&present=true' [admin] → HTTP 200
+CHECK PASS  registry: 29 present records
+  -- operational layers still publish immediately
+$ curl -X POST '/api/layers/3505419f-1adc-4388-8e7a-b04c0b8b1860/features' [mchs] → HTTP 200
+  ↳ {"id":"e590d762-80c2-4c3f-9c6a-a6490134b60b","version":1}
+CHECK PASS  operational edit visible to anonymous at once
+
+### FIX-2 — search for codes with hyphens
+CHECK PASS  full cadastral number 1-02-03-0605-0433 → 1
+  part of it, «0605-0433» → 0 (recorded, not required)
+CHECK PASS  word search «бишк» unchanged (26)
+CHECK PASS  code in title «ОБ-0001» still found
+
+### FIX-3a — logout is audited
+$ curl -X POST '/api/auth/logout' [goskart] → HTTP 200
+$ curl -X GET '/api/admin/audit?action=logout' [admin] → HTTP 200
+  ↳ {"action":"logout","userName":"Асель Токтогулова","outcome":"success","details":{"provider":"infocom"},"at":"2026-11-08T16:40:31.904+00:00"}
+CHECK PASS  logout event recorded with user and method
+
+### FIX-3b — unsupported formats → 400
+$ curl -X GET '/api/zoning/report?format=docx' [staff] → HTTP 400
+  ↳ {"error":"Неподдерживаемый формат отчёта «docx». Доступны: xlsx, pdf"}
+CHECK PASS  zoning report format=docx → 400
+$ curl -X GET '/api/admin/stats?format=xlsx' [admin] → HTTP 400
+  ↳ {"error":"Неподдерживаемый формат «xlsx»: сводная статистика выдаётся только в JSON"}
+CHECK PASS  admin stats format=xlsx → 400
+CHECK PASS  zoning report format=pdf still 200
+
+TOTAL CHECKS: 125 passed, 0 failed

@@ -1,0 +1,46 @@
+CHECK PASS  [FR-GIS-00] default basemap is OpenStreetMap
+CHECK PASS  [FR-GIS-00] OSM tiles requested — 20 tile requests
+NOTE        [FR-GIS-00] basemap options: ["OpenStreetMap","Без подложки"]
+CHECK PASS  [FR-GIS-00] switch none → osm works
+CHECK PASS  [FR-GIS-01] layers grouped by 7 themes — 7 themes, 34 layer rows
+CHECK PASS  [FR-GIS-01] layer-name search in tree (expected absent) — 0 text inputs in tree
+CHECK PASS  [FR-GIS-01] opacity slider (expected absent)
+CHECK PASS  [FR-GIS-05] legend shown for styled layer — "Озеленение Жилой Торговля/офисы Производство Сельхоз Социальный объект"
+CHECK PASS  [FR-GIS-05] click on map object opens its card — "Чуйская область"
+CHECK PASS  [FR-DAT-09] card opened for Каракол
+NOTE        [FR-DAT-09] map fits the object bbox on pick (see screenshot: Каракол centred); card ⤢ button re-zooms
+CHECK PASS  [FR-DAT-06] anonymous favourite → asks to log in — Войдите, чтобы сохранить в избранное
+CHECK PASS  [FR-DAT-06] print invoked
+CHECK PASS  [FR-DAT-06] card CSV export — ﻿"Атрибут";"Значение" | "Наименование";"Бишкек"
+CHECK PASS  [FR-DAT-06] card GeoJSON export — Feature
+NOTE        [FR-DAT-06] card actions: ["В избранное","Приблизить","Печать","Экспорт GeoJSON","CSV"] — no buffer, no route
+CHECK PASS  [FR-SRCH-03] results list shown — 20 items
+CHECK PASS  [FR-SRCH-03] result → card
+CHECK PASS  [FR-SRCH-04] results CSV export — ﻿"Наименование";"Слой";"Долгота";"Широта"
+CHECK PASS  [FR-SRCH-04] results GeoJSON export — 20 features, geometry Point, props id,title,layer
+CHECK PASS  [FR-SRCH-04] XML/PDF export (expected absent)
+CHECK PASS  [FR-SRCH-02] rectangle area search returns results — Объекты в выбранной области | ✕
+CHECK PASS  [FR-TUR-04] layer titles switch to Kyrgyz
+CHECK PASS  [FR-TUR-04] UI chrome stays Russian (expected gap)
+CHECK PASS  [FR-TUR-04] English switch (expected absent)
+NOTE        [FR-TER-06] cadastre-related rows: []
+CHECK PASS  [FR-TER-06] search by cadastral number (cad_no attr of ОБ-0001) — total 1
+CHECK PASS  [FR-TER-01] zoning + development layers shown together
+CHECK PASS  [FR-PUB-01] no horizontal overflow on 390px phone — {"vw":512,"sw":512,"mapW":90,"sideW":300}
+CHECK FAIL  [FR-PUB-01] map gets at least half the screen width — {"vw":512,"sw":512,"mapW":90,"sideW":300}
+CHECK PASS  [FR-AUTH-01] Infocom ID and Түндүк providers offered
+CHECK PASS  [FR-PUB-02] citizen: no staff menu
+CHECK PASS  [FR-PUB-02] citizen: «Мои слои» refused — Геопортал НИПД КР Национальная инфраструктура пространственных данных Карта РУС КЫР АГ Азамат Гражданин Авторизованный п
+CHECK PASS  [FR-DAT-05] layer registry + name filter — 1 rows → 0 after non-matching filter
+CHECK PASS  [FR-DAT-10] metadata block shown (abstract, periodicity, contact, CRS)
+CHECK PASS  [FR-DAT-12] self-intersection reported, import blocked — ["Объект №2: невалидная геометрия: самопересечение контура полигона[74.5925 42.862]"]
+CHECK PASS  [FR-DAT-12] errors CSV downloadable from wizard — ﻿уровень;объект;сообщение | ошибка;2;невалидная геометрия: самопересечение контура полигона[74.5925 42.862]
+CHECK PASS  [FR-GIS-03] point created by coordinates in operational layer
+CHECK PASS  [FR-DAT-06] favourite stored for logged-in user (browser localStorage only) — ["3c596293-5ab7-41e4-8b36-013d6c2e7a80"]
+CHECK PASS  [FR-TER-04] type filter NO_ZONE → 3 in registry — РЕЕСТР РАСХОЖДЕНИЙ (3)
+CHECK PASS  [FR-TER-02] check for Бишкек: 117 / 29 — Последняя проверка: Бишкек 08.11.2026, 16:42 Проверено объектов: 117; расхождений: 29 (новых: 0)
+CHECK PASS  [FR-TER-03] history shows new status, author, attached act
+CHECK PASS  [FR-AUTH-06] journal lists logins and the denial — Время	Пользователь	Орг.	Событие	Объект	Результат	Детали	IP | 08.11.2026, 16:42:36	Администратор Геопортала	zemagency	Статус расхождения	discrepancy 3902af68	успешно	to: confirmed; from: new	172.20.0.6
+CHECK PASS  [ALL] no JS page errors
+
+UI CHECKS: 39 passed, 1 failed

@@ -4,7 +4,7 @@ FR-DAT-03;PARTIAL;Image+PDF attach/download on zoning discrepancies works (byte-
 FR-DAT-04;PARTIAL;Batch file upload via UI and API works (10 formats), no streaming/HTTP pull/SSH/SFTP/Kafka, import errors not in audit log
 FR-DAT-05;PARTIAL;Layer list and discrepancy registry with filters work, no generic registry module or record relations
 FR-DAT-06;PARTIAL;Card: favourites (localStorage, login required), print, GeoJSON/CSV export work, no buffer, no route
-FR-DAT-08;PARTIAL;CRUD with rights (403/401) and audit + history works, no relations, edits to published layer bypass draft (bug)
+FR-DAT-08;PARTIAL;CRUD with rights (403/401), audit and history works, edits to published layers now go to a draft (copy-on-write, fixed f63c8ef), no relations
 FR-DAT-09;PASS;Card -> map positioning works for features and discrepancies, review said Частично
 FR-DAT-10;PARTIAL;Metadata (abstract, keywords, lineage, update_freq, contact) shown, no ISO 19115 profile, no metadata editing
 FR-DAT-12;PARTIAL;Missing required field and self-intersection block import, errors CSV, commit of invalid job 409, publish is explicit, no quarantine status, no ISO 19157
@@ -14,7 +14,7 @@ FR-GIS-03;PASS;Create point/line/polygon, add vertex, move, delete via API, UI p
 FR-GIS-05;PASS;Legend in layer tree, map click opens card, review said Частично
 FR-GIS-06;PARTIAL;Internal MVT tiles work, no WFS/WFS-T
 FR-GIS-07;PARTIAL;SHP, GPKG, GeoJSON, KML, KMZ, TAB, MIF, FileGDB, CSV, GML read, Kyrg-06 zone 3 auto-detected and reprojected, TAB/MIF/CSV CRS not auto-detected, full ЧТЗ list not checked
-FR-SRCH-01;PARTIAL;Prefix search ru works, no morphology (Бишкеке=0), Kyrgyz forms (Чүй=0), hyphenated attribute codes unsearchable, precision/recall not measurable (no corpus)
+FR-SRCH-01;PARTIAL;Prefix search ru works, full hyphenated codes now found (fixed f880760), fragment 0605-0433 still not, no morphology (Бишкеке=0), Kyrgyz forms (Чүй=0), precision/recall not measurable (no corpus)
 FR-SRCH-02;PARTIAL;Rectangle search correct, API already accepts any polygon (contour) but UI only rectangle, no centre/buffer
 FR-SRCH-03;PASS;Result list, highlight and card work, review said Частично
 FR-SRCH-04;PARTIAL;CSV and GeoJSON only, no XML/PDF, exports lack attributes and real geometry
@@ -26,16 +26,16 @@ FR-PUB-02;PARTIAL;anon/authorized/staff/admin enforced consistently, full ЧТЗ
 FR-AUTH-01;BLOCKED;Real Infocom ID / Түндүк not available, emulated Infocom and Түндүк logins both work and create one profile
 FR-AUTH-02;BLOCKED;Real Е-Кызмат not available, mock registry path works (inactive employee denied, org/position taken)
 FR-AUTH-03;PARTIAL;Block/unblock and role change work and are audited, no explicit create/delete (users auto-created on first login)
-FR-AUTH-06;PARTIAL;Login (with provider), denied login and block are logged in PostgreSQL, logout not logged (review missed), no ClickHouse
+FR-AUTH-06;PASS;Login (with provider), logout (fixed 7bb6cb0), denied login and block are logged with method, storage PostgreSQL not ClickHouse (architecture item), review said Частично
 FR-ADM-01;PARTIAL;Role assignment works and is journaled, no visibility scopes
-FR-ADM-02;FAIL;Only /admin/stats counters, no Excel, field selection, usage metrics or country distribution, review said Частично
-FR-RPT-01;PARTIAL;Zoning report reflects current filter, no generic selection report, no DOCX/PPTX (format=docx returns XLSX)
+FR-ADM-02;FAIL;Only /admin/stats counters, format=xlsx now 400 instead of JSON (fixed c7f1484), no Excel, field selection, usage metrics or country distribution, review said Частично
+FR-RPT-01;PARTIAL;Zoning report reflects current filter, unsupported format now 400 (fixed c7f1484), no generic selection report, no DOCX/PPTX
 FR-RPT-04;PARTIAL;XLSX only for zoning report, card CSV has attributes, search export does not
 FR-TER-01;PARTIAL;Zoning and development layers overlaid without shift, stored/shown in WGS-84 not Kyrg-06 (Kyrg-06 only as import source), review said Есть
 FR-TER-02;PASS;117 checked, 29 found (17/3/9), independent SQL: 29 matched, 0 missed, 0 extra, control set is synthetic demo data
 FR-TER-03;PASS;Record has object, type, responsible org, status history with author, time and attached act
 FR-TER-04;PASS;Filters by type/status/territory return only matching records, map highlight
 FR-TER-05;PASS;XLSX/PDF for Бишкек: total 29 and 17/3/9 equal registry
-FR-TER-06;PARTIAL;Boundaries/settlements/roads/hydro shown together, no cadastre data, search by cadastral number returns 0 (bug), no opacity/order
-FR-TER-07;PARTIAL;Zone with permitted use created, boundary changed, per-object history, no document file, edit goes straight to published version, no new layer version
+FR-TER-06;PARTIAL;Boundaries/settlements/roads/hydro shown together, search by cadastral number now finds the object (fixed f880760), no cadastre layer data, no opacity/order
+FR-TER-07;PARTIAL;Zone with permitted use created, boundary changed, edits create a new draft version, history records author/date/version, publish/rollback work (fixed f63c8ef), no document file
 FR-TUR-04;PARTIAL;КЫР switches layer titles only, UI chrome Russian, no English
