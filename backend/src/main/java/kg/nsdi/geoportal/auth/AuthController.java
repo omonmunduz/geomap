@@ -89,6 +89,18 @@ public class AuthController {
         return Map.of("token", tokens.issue(cu), "user", cu);
     }
 
+    /** Выход: токен удаляется на клиенте, здесь событие фиксируется в журнале — с тем же способом входа, что и login. */
+    @PostMapping("/logout")
+    public Map<String, Object> logout(HttpServletRequest http) {
+        CurrentUser u = CurrentUser.get();
+        if (u != null) {
+            String subject = db.query("SELECT ext_subject FROM core.users WHERE id=?", rs -> rs.next() ? rs.getString(1) : null, u.id());
+            String provider = subject == null ? "unknown" : registry.lookup(subject).map(EmploymentRegistry.Employment::provider).orElse("unknown");
+            audit.log(u.id(), u.name(), u.orgCode(), "logout", "user", u.id().toString(), "success", Map.of("provider", provider), http.getRemoteAddr());
+        }
+        return Map.of("loggedOut", true);
+    }
+
     @GetMapping("/me")
     public Object me() {
         CurrentUser u = CurrentUser.get();
