@@ -1,0 +1,43 @@
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: geoportal
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:geoportal}
+    username: ${DB_USER:geo}
+    password: ${DB_PASSWORD:geo}
+    hikari:
+      maximum-pool-size: 20
+  flyway:
+    enabled: true
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+  jackson:
+    default-property-inclusion: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+app:
+  jwt-secret: ${JWT_SECRET:dev-only-secret-change-me-in-production-0123456789}
+  jwt-ttl-minutes: ${JWT_TTL_MINUTES:480}
+  # Демонстрационный вход вместо Infocom ID / Түндүк. В продуктиве — false.
+  dev-login: ${DEV_LOGIN:true}
+  storage-dir: ${STORAGE_DIR:./storage}
+  gdal:
+    ogr2ogr: ${OGR2OGR:ogr2ogr}
+    ogrinfo: ${OGRINFO:ogrinfo}
+    # Строка подключения GDAL к той же БД (для загрузки в staging)
+    pg: "host=${DB_HOST:localhost} port=${DB_PORT:5432} dbname=${DB_NAME:geoportal} user=${DB_USER:geo} password=${DB_PASSWORD:geo}"
+    timeout-seconds: 600
+  seed:
+    enabled: ${SEED_DEMO:true}
+    dir: ${SEED_DIR:../demo-data}

@@ -1,0 +1,36 @@
+# Геопортал НИПД КР — MVP. Запуск: docker compose up --build  →  http://localhost:8088
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: geoportal
+      POSTGRES_USER: geo
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-geo}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geo -d geoportal"]
+      interval: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DB_HOST: db
+      DB_PASSWORD: ${DB_PASSWORD:-geo}
+      JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me-0123}
+      DEV_LOGIN: ${DEV_LOGIN:-true}
+      SEED_DEMO: ${SEED_DEMO:-true}
+    volumes: [storage:/data]
+    depends_on:
+      db: { condition: service_healthy }
+
+  frontend:
+    build: ./frontend
+    ports: ["8088:80"]
+    depends_on: [backend]
+
+volumes:
+  pgdata:
+  storage:
