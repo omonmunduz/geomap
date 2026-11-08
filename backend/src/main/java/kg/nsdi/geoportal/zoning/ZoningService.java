@@ -117,7 +117,7 @@ public class ZoningService {
         args.addAll(List.of(d.id(), d.publishedVersion()));
         List<Map<String, Object>> devs = db.queryForList("""
             WITH terr AS (SELECT %s AS g)
-            SELECT f.id, f.title, f.attrs->>'use_type' AS use_type, ST_Area(f.geom::geography) AS area
+            SELECT f.id, f.origin_id, f.title, f.attrs->>'use_type' AS use_type, ST_Area(f.geom::geography) AS area
             FROM spatial.features f, terr
             WHERE f.layer_id=? AND f.version=? AND NOT f.deleted AND ST_Intersects(f.geom, terr.g)""".formatted(terrGeomSql), args.toArray());
 
@@ -198,14 +198,15 @@ public class ZoningService {
     private int upsert(UUID checkId, UUID territoryId, String territoryName, Map<String, Object> dev, UUID zoneId, String type,
                        String use, String zoneType, String details, UUID orgId) {
         UUID devId = (UUID) dev.get("id");
-        String fp = devId + ":" + type;
+        // отпечаток по «сквозному» id объекта: после публикации новой версии слоя освоения расхождение то же самое
+        String fp = dev.get("origin_id") + ":" + type;
         UUID existing = db.query("SELECT id FROM zoning.discrepancies WHERE fingerprint=?", rs -> rs.next() ? (UUID) rs.getObject(1) : null, fp);
         if (existing != null) {
             db.update("""
-                UPDATE zoning.discrepancies SET last_check_id=?, still_present=true, zone_feature_id=?, zone_type=?, use_type=?, details=?,
+                UPDATE zoning.discrepancies SET last_check_id=?, still_present=true, dev_feature_id=?, zone_feature_id=?, zone_type=?, use_type=?, details=?,
                        territory_id=coalesce(?, territory_id), territory_name=coalesce(?, territory_name),
                        geom=(SELECT geom FROM spatial.features WHERE id=?), updated_at=now() WHERE id=?""",
-                checkId, zoneId, zoneType, use, details, territoryId, territoryId == null ? null : territoryName, devId, existing);
+                checkId, devId, zoneId, zoneType, use, details, territoryId, territoryId == null ? null : territoryName, devId, existing);
             return 0;
         }
         UUID id = db.queryForObject("""
