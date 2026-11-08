@@ -307,7 +307,6 @@ done
 CODE=$(curl -s -o "$OUT/rep_sel.xlsx" -w '%{http_code}' -H "Authorization: Bearer ${TOK[admin]}" "$BASE/api/zoning/report?format=xlsx&territoryId=$BSK&type=NO_ZONE")
 echo "\$ curl '/api/zoning/report?format=xlsx&territoryId=$BSK&type=NO_ZONE' [admin] → HTTP $CODE (filtered selection)"
 mkdir -p "$ROOT/docs/acceptance/evidence"; cp "$OUT/rep.xlsx" "$ROOT/docs/acceptance/evidence/zoning-report-bishkek.xlsx"; cp "$OUT/rep.pdf" "$ROOT/docs/acceptance/evidence/zoning-report-bishkek.pdf"; cp "$OUT/rep_sel.xlsx" "$ROOT/docs/acceptance/evidence/zoning-report-bishkek-NO_ZONE.xlsx"
-call staff GET "/api/zoning/report?format=docx"; say "  format=docx → HTTP $CODE, content starts '$(head -c 4 "$OUT/body" | tr -dc 'A-Za-z%')' (falls back to XLSX; no DOCX/PPTX)"
 
 fr "FR-TER-07 — create zone with permitted use, change boundary, history"
 UZ=$(lid urban_zones)
@@ -317,6 +316,128 @@ call staff2 PUT "/api/features/$FZ" $(json '{"geometry":{"type":"Polygon","coord
 check "zone boundary changed" "$CODE" 200
 call staff2 GET "/api/features/$FZ/history"; show '[.[] | {op, author, at}]'
 call staff2 GET "/api/catalog/layers/$UZ"; show '{draftVersion, publishedVersion, versions: [.versions[] | {version, author, createdAt, source}]}'
+
+# =============================================================================================
+# Regression checks for the fixes made after the verification run (docs/acceptance/mvp-verification.md §6)
+# ---------------------------------------------------------------------------------------------
+tile_of() { # tile_of lon lat z → "z/x/y"
+  awk -v lon="$1" -v lat="$2" -v z="$3" 'BEGIN { pi=atan2(0,-1); n=2^z; r=lat*pi/180;
+    printf "%d/%d/%d", z, int((lon+180)/360*n), int((1-log(sin(r)/cos(r)+1/cos(r))/pi)/2*n) }'; }
+tilesum() { # tilesum LAYER z/x/y → md5 of the anonymous tile
+  curl -s "$BASE/api/tiles/$1/$2.pbf" | md5sum | cut -c1-12; }
+zcheck() { # run the zoning check for Бишкек as admin → '{"d":29,"t":{...}}'
+  call admin POST /api/zoning/checks "{\"territoryId\":\"$BSK\"}" >/dev/null; echo "$BODY" | jq -c '{d: .discrepancies, t: .byType}'; }
+anon_search() { curl -s "$BASE/api/search?q=$(jq_uri "$1")" | jq .total; }
+anon_feature() { curl -s -o /dev/null -w '%{http_code}' "$BASE/api/features/$1"; }
+
+fr "FIX-1 — copy-on-write: staff edits go to a draft; publish shows them; rollback removes them"
+UZ=$(lid urban_zones)
+call staff2 GET "/api/catalog/layers/$UZ"; PUB0=$(echo "$BODY" | jq .publishedVersion)
+call staff2 POST "/api/layers/$UZ/rollback/$PUB0" >/dev/null     # discard drafts left by earlier sections
+say "  urban_zones published version: v$PUB0"
+BASE_CHECK=$(zcheck); say "  baseline zoning check: $BASE_CHECK"
+
+say "  -- add: a zone over a NO_ZONE object"
+call admin GET "/api/zoning/discrepancies?type=NO_ZONE&territoryId=$BSK"; NZ=$(echo "$BODY" | jq -c '.[0]')
+IFS=' ' read -r X1 Y1 X2 Y2 <<< "$(echo "$NZ" | jq -r '[.geometry.coordinates[0][]] | [(map(.[0])|min)-0.00002, (map(.[1])|min)-0.00002, (map(.[0])|max)+0.00002, (map(.[1])|max)+0.00002] | map(tostring) | join(" ")')"
+TILE=$(tile_of "$(echo "$NZ" | jq .lon)" "$(echo "$NZ" | jq .lat)" 14)
+T0=$(tilesum "$UZ" "$TILE"); say "  zone over $(echo "$NZ" | jq -r .objectTitle); anonymous tile $TILE md5 $T0"
+call staff2 POST "/api/layers/$UZ/features" "{\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[[[$X1,$Y1],[$X2,$Y1],[$X2,$Y2],[$X1,$Y2],[$X1,$Y1]]]},\"attrs\":{\"zone_code\":\"ATZONAKOW1\",\"zone_type\":\"residential\",\"zone_name\":\"Зона КОВ\",\"approval_doc\":\"Решение АТ\"}}"
+NEWZ=$(echo "$BODY" | jq -r .id); show '{id, version, title}'
+ADDV=$(echo "$BODY" | jq .version); DRAFTV=$(curl -s -H "Authorization: Bearer ${TOK[staff2]}" "$BASE/api/catalog/layers/$UZ" | jq .draftVersion)
+check "add: saved into a new draft version (> v$PUB0, = layer draft)" "$([ "$ADDV" -gt "$PUB0" ] && echo "$ADDV")" "$DRAFTV"
+call staff2 GET /api/my/layers; check "add: «Мои слои» status published_with_draft" "$(echo "$BODY" | jq -r --arg id "$UZ" '.[] | select(.id==$id) | .status')" published_with_draft
+check "add: anonymous feature card → 403" "$(anon_feature "$NEWZ")" 403
+check "add: anonymous search → 0" "$(anon_search ATZONAKOW1)" 0
+check "add: anonymous tile unchanged" "$(tilesum "$UZ" "$TILE")" "$T0"
+check "add: zoning check unchanged" "$(zcheck)" "$BASE_CHECK"
+call staff2 POST "/api/layers/$UZ/publish"; show '{publishedVersion, draftVersion, status}'
+check "add+publish: anonymous feature card → 200" "$(anon_feature "$NEWZ")" 200
+check "add+publish: anonymous search → 1" "$(anon_search ATZONAKOW1)" 1
+check "add+publish: anonymous tile changed" "$([ "$(tilesum "$UZ" "$TILE")" != "$T0" ] && echo changed)" changed
+AFTER=$(zcheck); say "  zoning check after publish: $AFTER"
+check "add+publish: zoning check picks up the zone (NO_ZONE −1)" "$(echo "$AFTER" | jq .t.NO_ZONE)" "$(( $(echo "$BASE_CHECK" | jq .t.NO_ZONE) - 1 ))"
+call staff2 POST "/api/layers/$UZ/rollback/$PUB0"; show '{publishedVersion, draftVersion}'
+check "add+rollback: anonymous feature card → 403" "$(anon_feature "$NEWZ")" 403
+check "add+rollback: anonymous search → 0" "$(anon_search ATZONAKOW1)" 0
+check "add+rollback: anonymous tile back to original" "$(tilesum "$UZ" "$TILE")" "$T0"
+check "add+rollback: zoning check back to baseline" "$(zcheck)" "$BASE_CHECK"
+
+say "  -- edit: change code and zone type of an existing zone (БШК-З-10, contains ОБ-0018)"
+ZID=$(curl -s "$BASE/api/search?q=$(jq_uri 'БШК-З-10')" | jq -r '.items[0].id')
+ZLON=$(curl -s "$BASE/api/features/$ZID" | jq .lon); ZLAT=$(curl -s "$BASE/api/features/$ZID" | jq .lat)
+TILE=$(tile_of "$ZLON" "$ZLAT" 14); T0=$(tilesum "$UZ" "$TILE")
+call staff2 GET "/api/features/$ZID"; ATTRS=$(echo "$BODY" | jq -c '.rawAttrs + {zone_code: "ATZONAKOW2", zone_type: "agricultural"}')
+call staff2 PUT "/api/features/$ZID" "{\"attrs\":$ATTRS}"; ZDRAFT=$(echo "$BODY" | jq -r .id); show '{id, version, title}'
+EDITV=$(echo "$BODY" | jq .version); DRAFTV=$(curl -s -H "Authorization: Bearer ${TOK[staff2]}" "$BASE/api/catalog/layers/$UZ" | jq .draftVersion)
+check "edit: saved into a new draft version (> v$PUB0, = layer draft)" "$([ "$EDITV" -gt "$PUB0" ] && echo "$EDITV")" "$DRAFTV"
+check "edit: published object keeps its code for anonymous" "$(curl -s "$BASE/api/features/$ZID" | jq -r .title)" "БШК-З-10"
+check "edit: anonymous search for new code → 0" "$(anon_search ATZONAKOW2)" 0
+check "edit: anonymous tile unchanged" "$(tilesum "$UZ" "$TILE")" "$T0"
+check "edit: zoning check unchanged" "$(zcheck)" "$BASE_CHECK"
+call staff2 PUT "/api/features/$ZID" "{\"attrs\":$ATTRS}" >/dev/null
+check "edit again by the published id hits the same draft object" "$(echo "$BODY" | jq -r .id)" "$ZDRAFT"
+call staff2 GET "/api/features/$ZDRAFT/history"; show '[.[] | {op, version, author}]'
+check "history records the version" "$(echo "$BODY" | jq -c '[.[] | .version] | unique')" "[$EDITV]"
+call staff2 POST "/api/layers/$UZ/publish" >/dev/null
+check "edit+publish: anonymous search for new code → 1" "$(anon_search ATZONAKOW2)" 1
+check "edit+publish: anonymous tile changed" "$([ "$(tilesum "$UZ" "$TILE")" != "$T0" ] && echo changed)" changed
+AFTER=$(zcheck); say "  zoning check after publish: $AFTER"
+check "edit+publish: zoning check result changed" "$([ "$AFTER" != "$BASE_CHECK" ] && echo changed)" changed
+call staff2 POST "/api/layers/$UZ/rollback/$PUB0" >/dev/null
+check "edit+rollback: anonymous search for new code → 0" "$(anon_search ATZONAKOW2)" 0
+check "edit+rollback: anonymous tile back to original" "$(tilesum "$UZ" "$TILE")" "$T0"
+check "edit+rollback: zoning check back to baseline" "$(zcheck)" "$BASE_CHECK"
+
+say "  -- delete: remove an existing zone (БШК-З-10)"
+call staff2 DELETE "/api/features/$ZID"; show .
+check "delete: anonymous feature card still 200" "$(anon_feature "$ZID")" 200
+check "delete: anonymous search still finds it" "$(anon_search 'БШК-З-10')" 1
+check "delete: anonymous tile unchanged" "$(tilesum "$UZ" "$TILE")" "$T0"
+check "delete: zoning check unchanged" "$(zcheck)" "$BASE_CHECK"
+call staff2 POST "/api/layers/$UZ/publish" >/dev/null
+check "delete+publish: anonymous search → 0" "$(anon_search 'БШК-З-10')" 0
+check "delete+publish: anonymous tile changed" "$([ "$(tilesum "$UZ" "$TILE")" != "$T0" ] && echo changed)" changed
+AFTER=$(zcheck); say "  zoning check after publish: $AFTER"
+check "delete+publish: zoning check picks it up (NO_ZONE grows)" "$([ "$(echo "$AFTER" | jq .t.NO_ZONE)" -gt "$(echo "$BASE_CHECK" | jq .t.NO_ZONE)" ] && echo grew)" grew
+call staff2 POST "/api/layers/$UZ/rollback/$PUB0" >/dev/null
+check "delete+rollback: anonymous search → 1" "$(anon_search 'БШК-З-10')" 1
+check "delete+rollback: anonymous tile back to original" "$(tilesum "$UZ" "$TILE")" "$T0"
+check "delete+rollback: zoning check back to baseline" "$(zcheck)" "$BASE_CHECK"
+
+say "  -- registry stability: edit + publish the development layer, then re-run the check"
+DEVL=$(lid current_development)
+DOBJ=$(curl -s "$BASE/api/search?q=$(jq_uri 'ОБ-0001')" | jq -r '.items[0].id')
+call admin GET "/api/features/$DOBJ"; DATTRS=$(echo "$BODY" | jq -c '.rawAttrs + {source: "проверка АТ"}')
+call admin PUT "/api/features/$DOBJ" "{\"attrs\":$DATTRS}" >/dev/null
+call admin POST "/api/layers/$DEVL/publish" >/dev/null
+call admin POST /api/zoning/checks "{\"territoryId\":\"$BSK\"}"; show '{discrepancies, newDiscrepancies}'
+check "dev layer re-published: same discrepancies, 0 new (no duplicates)" "$(echo "$BODY" | jq -c '[.discrepancies, .newDiscrepancies]')" "[29,0]"
+call admin GET "/api/zoning/discrepancies?territoryId=$BSK&present=true"; check "registry: 29 present records" "$(echo "$BODY" | jq length)" 29
+
+say "  -- operational layers still publish immediately"
+LS=$(lid landslides)
+call mchs POST "/api/layers/$LS/features" '{"geometry":{"type":"Point","coordinates":[74.6,42.88]},"attrs":{"event_type":"landslide","event_date":"2026-11-08","note":"АТ оперативный"}}'; OPF=$(echo "$BODY" | jq -r .id); show '{id, version}'
+check "operational edit visible to anonymous at once" "$(anon_feature "$OPF")" 200
+
+fr "FIX-2 — search for codes with hyphens"
+check "full cadastral number 1-02-03-0605-0433 → 1" "$(anon_search '1-02-03-0605-0433')" 1
+say "  part of it, «0605-0433» → $(anon_search '0605-0433') (recorded, not required)"
+check "word search «бишк» unchanged (26)" "$(anon_search 'бишк')" 26
+check "code in title «ОБ-0001» still found" "$(anon_search 'ОБ-0001')" 1
+
+fr "FIX-3a — logout is audited"
+LT=$(token infocom:goskart)
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $LT" "$BASE/api/auth/logout"); echo "\$ curl -X POST '/api/auth/logout' [goskart] → HTTP $CODE"
+call admin GET "/api/admin/audit?action=logout"; show '[.[] | {action, userName, outcome, details, at}] | .[0]'
+check "logout event recorded with user and method" "$(echo "$BODY" | jq -r '[.[] | select(.userName=="Асель Токтогулова")][0] | "\(.action)/\(.details.provider)"')" "logout/infocom"
+
+fr "FIX-3b — unsupported formats → 400"
+call staff GET "/api/zoning/report?format=docx"; show .
+check "zoning report format=docx → 400" "$CODE" 400
+call admin GET "/api/admin/stats?format=xlsx"; show .
+check "admin stats format=xlsx → 400" "$CODE" 400
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${TOK[admin]}" "$BASE/api/zoning/report?format=pdf"); check "zoning report format=pdf still 200" "$CODE" 200
 
 echo
 echo "TOTAL CHECKS: $PASS passed, $FAIL failed"
