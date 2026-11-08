@@ -2,6 +2,7 @@
 //   docker run --rm --ipc=host --network geoportal-mvp_default -v "$PWD:/w" -w /tmp -e BASE=http://frontend \
 //     mcr.microsoft.com/playwright:v1.49.1-noble sh -c "npm i -s playwright@1.49.1 && cp /w/scripts/ui-check.mjs . && node ui-check.mjs"
 // Screenshots → docs/screenshots/.
+import { chromium } from 'playwright'
 
 const BASE = process.env.BASE ?? 'http://frontend'
 const SHOTS = '/w/docs/screenshots'
