@@ -28,6 +28,9 @@ public class SearchController {
         WHERE NOT f.deleted AND (l.access_level = 'open' OR :staff)
         """;
 
+    /** Префиксный запрос из лексем, разобранных тем же парсером 'simple', что и индекс: коды с дефисами («1-02-03-0605-0433») индексируются как «1», «-02», … */
+    private static final String TSQ = "(SELECT to_tsquery('simple', string_agg(quote_literal(lexeme) || ':*', ' & ')) FROM unnest(to_tsvector('simple', :q)))";
+
     private static final String COLUMNS = """
         SELECT f.id, f.title, f.layer_id, l.title_ru AS layer_title, l.code AS layer_code,
                ST_X(ST_PointOnSurface(f.geom)) AS lon, ST_Y(ST_PointOnSurface(f.geom)) AS lat,
@@ -44,18 +47,17 @@ public class SearchController {
         List<String> tokens = Arrays.stream(query.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+"))
                 .filter(s -> !s.isBlank()).limit(8).toList();
         if (tokens.isEmpty()) return Map.of("total", 0, "items", List.of());
-        String tsq = String.join(" & ", tokens.stream().map(s -> s + ":*").toList());
 
         MapSqlParameterSource p = new MapSqlParameterSource()
                 .addValue("staff", CurrentUser.staff(CurrentUser.get()))
-                .addValue("tsq", tsq).addValue("q", query).addValue("like", "%" + query.replace("%", "") + "%")
+                .addValue("q", query).addValue("like", "%" + query.replace("%", "") + "%")
                 .addValue("limit", Math.min(Math.max(limit, 1), 100)).addValue("offset", Math.max(offset, 0));
-        String filter = " AND (f.search @@ to_tsquery('simple', :tsq) OR f.title ILIKE :like)";
+        String filter = " AND (f.search @@ " + TSQ + " OR f.title ILIKE :like)";
         if (layers != null && !layers.isEmpty()) { filter += " AND f.layer_id IN (:layers)"; p.addValue("layers", layers); }
 
         Long total = db.queryForObject("SELECT count(*) " + VISIBLE + filter, p, Long.class);
         List<Map<String, Object>> items = db.queryForList(COLUMNS + VISIBLE + filter +
-                " ORDER BY ts_rank(f.search, to_tsquery('simple', :tsq)) + similarity(coalesce(f.title,''), :q) DESC, f.title LIMIT :limit OFFSET :offset", p)
+                " ORDER BY ts_rank(f.search, " + TSQ + ") + similarity(coalesce(f.title,''), :q) DESC, f.title LIMIT :limit OFFSET :offset", p)
                 .stream().map(SearchController::dto).toList();
         return Map.of("total", total == null ? 0 : total, "items", items);
     }
