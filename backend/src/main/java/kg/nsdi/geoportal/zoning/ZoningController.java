@@ -92,6 +92,8 @@ public class ZoningController {
                                          @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
                                          @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) throws IOException {
         CurrentUser u = CurrentUser.require();
+        if (!"xlsx".equalsIgnoreCase(format) && !"pdf".equalsIgnoreCase(format))
+            throw ApiException.bad("Неподдерживаемый формат отчёта «" + format + "». Доступны: xlsx, pdf");
         var f = new ZoningService.Filter(territoryId, type, status, null, from, to);
         String terr = territoryId == null ? null : db.query("SELECT title FROM spatial.features WHERE id=?", rs -> rs.next() ? rs.getString(1) : null, territoryId);
         boolean pdf = "pdf".equalsIgnoreCase(format);
