@@ -2,8 +2,9 @@
 # Демо-стенд одной командой:
 #   1) docker compose up --build и ожидание /actuator/health = UP;
 #   2) публичная ссылка через Cloudflare Quick Tunnel (cloudflared tunnel --url http://localhost:8088)
-#      и проверка через неё /api и векторных тайлов.
-# Ctrl+C закрывает туннель; контейнеры остаются (остановить: docker compose down).
+#      и проверка через неё /actuator/health и векторного тайла.
+# Если cloudflared падает, он перезапускается в цикле; каждая новая ссылка с временем дописывается в demo-url.txt.
+# Ctrl+C закрывает туннель; контейнеры остаются (restart: unless-stopped; остановить: docker compose down).
 #
 # Нужно заранее (в git не попадают):
 #   .env                         JWT_SECRET, DB_PASSWORD
@@ -29,6 +30,10 @@ if [ -z "$CF" ]; then
 fi
 [ -n "$CF" ] || die "cloudflared не найден (Windows: winget install Cloudflare.cloudflared; macOS: brew install cloudflared)"
 
+echo "==> Жду Docker (после входа в Windows Docker Desktop стартует не сразу)"
+for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 5; done
+docker info >/dev/null 2>&1 || die "Docker не запущен"
+
 echo "==> Сборка и запуск (docker compose up --build)"
 "${DC[@]}" up --build -d
 
@@ -41,40 +46,71 @@ done
 [ -n "$up" ] || { "${DC[@]}" logs --tail 60 backend; die "backend не поднялся"; }
 echo "    backend: UP"
 
-echo "==> Туннель cloudflared → http://localhost:$PORT"
+URL_FILE=demo-url.txt
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
 LOG=$(mktemp)
-"$CF" tunnel --no-autoupdate --url "http://localhost:$PORT" >"$LOG" 2>&1 &
-CF_PID=$!
-trap 'kill "$CF_PID" 2>/dev/null || true; rm -f "$LOG"' EXIT INT TERM
+CF_PID=""
+cleanup() { if [ -n "$CF_PID" ]; then kill "$CF_PID" 2>/dev/null || true; fi; rm -f "$LOG"; }
+trap 'echo; echo "Остановлено, туннель закрыт."; cleanup; exit 0' INT TERM
+trap cleanup EXIT
 
-URL=""
-for _ in $(seq 1 60); do
-  URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$LOG" | head -1 || true)
-  [ -n "$URL" ] && break
-  sleep 1
-done
-[ -n "$URL" ] || { cat "$LOG"; die "cloudflared не выдал ссылку"; }
-
-if [ -f secrets/demo-credentials.env ]; then
+# Самопроверка ссылки (если есть secrets/demo-credentials.env): health и векторный тайл через туннель с basic auth
+check_url() {
+  local url=$1
+  [ -f secrets/demo-credentials.env ] || return 0
   # shellcheck disable=SC1091
   . secrets/demo-credentials.env
-  AUTH="${DEMO_USER:-demo}:${DEMO_PASSWORD}"
-  echo "==> Проверка ссылки (DNS нового адреса появляется за несколько секунд)"
-  code=""
+  local auth="${DEMO_USER:-demo}:${DEMO_PASSWORD}" code="" obl tile
+  echo "    проверка ссылки (DNS нового адреса появляется за несколько секунд)…"
   for _ in $(seq 1 90); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' -u "$AUTH" "$URL/api/catalog/tree" || true)
+    code=$(curl -s -o /dev/null -w '%{http_code}' -u "$auth" "$url/actuator/health" || true)
     [ "$code" = 200 ] && break
     sleep 2
   done
-  echo "    /api/catalog/tree с паролем: HTTP $code"
-  echo "    /api/catalog/tree без пароля: HTTP $(curl -s -o /dev/null -w '%{http_code}' "$URL/api/catalog/tree")"
-  OBL=$(curl -s -u "$AUTH" "$URL/api/catalog/tree" | grep -o '"id":"[0-9a-f-]*","code":"atd_oblasts"' | cut -d'"' -f4)
-  TILE=$(curl -s -u "$AUTH" -o /dev/null -w '%{http_code} %{size_download} байт' "$URL/api/tiles/$OBL/5/22/11.pbf")
-  echo "    тайл atd_oblasts 5/22/11: HTTP $TILE"
-fi
+  echo "    /actuator/health с паролем: HTTP $code $(curl -s -u "$auth" "$url/actuator/health" || true)"
+  echo "    /actuator/health без пароля: HTTP $(curl -s -o /dev/null -w '%{http_code}' "$url/actuator/health" || true)"
+  obl=$(curl -s -u "$auth" "$url/api/catalog/tree" | grep -o '"id":"[0-9a-f-]*","code":"atd_oblasts"' | cut -d'"' -f4 || true)
+  tile=$(curl -s -u "$auth" -o /dev/null -w '%{http_code}, %{size_download}' "$url/api/tiles/$obl/5/22/11.pbf" || true)
+  echo "    тайл atd_oblasts 5/22/11: HTTP $tile байт"
+}
 
-echo
-echo "  Публичная ссылка: $URL"
-echo "  Логин: demo, пароль: в secrets/demo-credentials.env"
-echo "  Ctrl+C — закрыть туннель"
-wait "$CF_PID"
+# cloudflared перезапускается, если упал; каждая новая ссылка дописывается с временем в demo-url.txt.
+# Пауза между перезапусками растёт 10 с → 5 мин, если туннель падает сразу, и сбрасывается после 5 минут работы.
+delay=10
+attempt=0
+while true; do
+  attempt=$((attempt + 1))
+  echo "==> [$(ts)] Туннель cloudflared → http://localhost:$PORT (запуск №$attempt)"
+  : >"$LOG"
+  started=$(date +%s)
+  "$CF" tunnel --no-autoupdate --url "http://localhost:$PORT" >"$LOG" 2>&1 &
+  CF_PID=$!
+
+  URL=""
+  for _ in $(seq 1 60); do
+    URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' "$LOG" | head -1 || true)
+    [ -n "$URL" ] && break
+    kill -0 "$CF_PID" 2>/dev/null || break
+    sleep 1
+  done
+
+  if [ -n "$URL" ]; then
+    echo "$(ts)  $URL" >>"$URL_FILE"
+    echo
+    echo "  Публичная ссылка: $URL   (записана в $URL_FILE)"
+    echo "  Логин: demo, пароль: в secrets/demo-credentials.env. Ctrl+C — закрыть туннель."
+    check_url "$URL"
+  else
+    echo "    cloudflared не выдал ссылку за 60 с:"; tail -5 "$LOG"
+    kill "$CF_PID" 2>/dev/null || true
+  fi
+
+  rc=0
+  wait "$CF_PID" || rc=$?
+  CF_PID=""
+  if [ $(( $(date +%s) - started )) -ge 300 ]; then delay=10; fi
+  echo "!!! [$(ts)] cloudflared завершился (код $rc); перезапуск через $delay с. Последние строки лога:"
+  tail -3 "$LOG" | sed 's/^/    /'
+  sleep "$delay"
+  delay=$(( delay * 2 > 300 ? 300 : delay * 2 ))
+done

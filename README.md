@@ -19,8 +19,9 @@ docker compose up --build      # → http://localhost:8088
 ```
 Скрипт собирает и запускает `docker-compose.yml` (без `docker-compose.override.yml`: наружу открыт только :8088),
 ждёт `/actuator/health` = UP, поднимает туннель `cloudflared tunnel --url http://localhost:8088`, проверяет через
-полученную ссылку `/api` и векторный тайл и печатает ссылку. Ctrl+C закрывает туннель, контейнеры продолжают работать
-(`docker compose down` — остановить). Нужен `cloudflared` в PATH или в `%LOCALAPPDATA%\cloudflared\cloudflared.exe`
+полученную ссылку `/actuator/health` и векторный тайл и печатает ссылку. Если `cloudflared` падает, он перезапускается
+в цикле, и каждая новая ссылка с временем дописывается в `demo-url.txt` (в git не попадает). Ctrl+C закрывает туннель,
+контейнеры продолжают работать (`restart: unless-stopped`; `docker compose down` — остановить). Нужен `cloudflared` в PATH или в `%LOCALAPPDATA%\cloudflared\cloudflared.exe`
 (`winget install Cloudflare.cloudflared`, `brew install cloudflared` или бинарник со страницы релизов
 github.com/cloudflare/cloudflared).
 
