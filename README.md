@@ -70,6 +70,21 @@ cd frontend && npm install && npm run dev  # :5173, прокси /api → :8080
 - `frontend/` — React 18 + TypeScript + MapLibre GL
 - `demo-data/` — демо-слои (Natural Earth, geoBoundaries; зонирование Бишкека — синтетическое) и `samples/` для показа импорта
 
+## Переменные окружения для показа
+| Переменная | По умолчанию | Что делает |
+|---|---|---|
+| `SEED_DEMO` | `true` | загрузить демо-слои из `demo-data/` при первом старте (пустая БД) |
+| `SEED_ZONING_CHECK` | `true` | после загрузки выполнить начальную проверку зонирования по Бишкеку, чтобы реестр расхождений не был пустым. `false` — проверка не выполняется, и первый запуск на показе даёт 29 **новых** расхождений |
+| `DEV_LOGIN` | `true` | демо-вход без Infocom ID |
+
+Флаги сидера срабатывают только на пустой БД:
+```bash
+docker compose down -v && SEED_ZONING_CHECK=false docker compose up --build
+```
+
+Сценарий показа (~15 минут) — [docs/DEMO.md](docs/DEMO.md).
+
 ## Статус
-Java-код ещё ни разу не компилировался (в среде разработки не было доступа к Maven Central).
-SQL проверен на PostGIS, фронтенд — в браузере. Первый шаг: `mvn package` в `backend/`.
+Бэкенд собирается (`mvn -B package`), стек поднимается `docker compose up --build`: Flyway применяет миграции,
+сидер загружает 7 демо-слоёв (328 объектов). Приёмочный прогон пройден 10.11.2026 — результаты в
+[docs/acceptance/](docs/acceptance/), исправления — в истории git и [FIXES.md](FIXES.md).

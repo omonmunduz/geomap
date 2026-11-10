@@ -24,6 +24,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me-0123}
       DEV_LOGIN: ${DEV_LOGIN:-true}
       SEED_DEMO: ${SEED_DEMO:-true}
+      SEED_ZONING_CHECK: ${SEED_ZONING_CHECK:-true}
     volumes: [storage:/data]
     depends_on:
       db: { condition: service_healthy }

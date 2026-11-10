@@ -80,6 +80,7 @@ public class DemoSeeder implements ApplicationRunner {
             log.info("Seeded {} v{} ({} objects)", it.layer(), version, v.get("total"));
         }
         // начальная проверка зонирования по г. Бишкек, чтобы реестр расхождений не был пустым
+        if (!props.seed().zoningCheck()) { log.info("Initial zoning check skipped (SEED_ZONING_CHECK=false)"); return; }
         UUID bishkek = db.query("""
             SELECT f.id FROM spatial.features f JOIN catalog.layers l ON l.id=f.layer_id AND f.version=l.published_version
             WHERE l.code='atd_oblasts' AND f.title ILIKE 'Бишкек%' LIMIT 1""", rs -> rs.next() ? (UUID) rs.getObject(1) : null);
