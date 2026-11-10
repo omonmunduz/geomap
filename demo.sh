@@ -1,26 +1,33 @@
 #!/usr/bin/env bash
 # Демо-стенд одной командой:
-#   1) docker compose up --build и ожидание /actuator/health = UP;
+#   1) docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build (basic auth в nginx)
+#      и ожидание /actuator/health = UP;
 #   2) публичная ссылка через Cloudflare Quick Tunnel (cloudflared tunnel --url http://localhost:8088)
 #      и проверка через неё /actuator/health и векторного тайла.
 # Если cloudflared падает, он перезапускается в цикле; каждая новая ссылка с временем дописывается в demo-url.txt.
-# Ctrl+C закрывает туннель; контейнеры остаются (restart: unless-stopped; остановить: docker compose down).
+# Ctrl+C закрывает туннель; контейнеры остаются (restart: unless-stopped;
+# остановить: docker compose -f docker-compose.yml -f docker-compose.demo.yml down).
 #
 # Нужно заранее (в git не попадают):
 #   .env                         JWT_SECRET, DB_PASSWORD
-#   secrets/htpasswd             basic auth для nginx (логин demo)
+#   secrets/htpasswd             basic auth для nginx (логин demo) — без него стенд не запускается
 #   secrets/demo-credentials.env DEMO_USER, DEMO_PASSWORD — только для самопроверки ссылки (необязательно)
+# Пароль включает только docker-compose.demo.yml (frontend/nginx.auth.conf + secrets/htpasswd);
+# обычный docker compose up — локальный запуск без пароля.
 # docker-compose.override.yml (порты БД и backend для разработки) здесь намеренно не используется:
 # наружу открыт только frontend на :8088 под паролем.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 PORT=8088
-DC=(docker compose -f docker-compose.yml)
+DC=(docker compose -f docker-compose.yml -f docker-compose.demo.yml)
 
 die() { echo "ОШИБКА: $*" >&2; exit 1; }
 [ -f .env ] || die ".env не найден (нужны JWT_SECRET и DB_PASSWORD)"
-[ -f secrets/htpasswd ] || die "secrets/htpasswd не найден, например: printf 'demo:%s\n' \"\$(openssl passwd -6 ПАРОЛЬ)\" > secrets/htpasswd"
+[ -d secrets/htpasswd ] && die "secrets/htpasswd — папка (её создаёт Docker, если файла не было). Удалите её и создайте файл, см. README, «Демо-стенд»"
+[ -s secrets/htpasswd ] || die "secrets/htpasswd не найден или пуст — без него публичный стенд остался бы без пароля.
+  Создайте: mkdir -p secrets && printf 'demo:%s\n' \"\$(openssl passwd -6 ПАРОЛЬ)\" > secrets/htpasswd
+  (подробнее — README, «Демо-стенд»)"
 
 CF=$(command -v cloudflared || command -v cloudflared.exe || true)
 if [ -z "$CF" ]; then
@@ -34,7 +41,7 @@ echo "==> Жду Docker (после входа в Windows Docker Desktop ста�
 for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 5; done
 docker info >/dev/null 2>&1 || die "Docker не запущен"
 
-echo "==> Сборка и запуск (docker compose up --build)"
+echo "==> Сборка и запуск с basic auth (docker-compose.yml + docker-compose.demo.yml)"
 "${DC[@]}" up --build -d
 
 echo "==> Жду /actuator/health = UP"

@@ -5,9 +5,17 @@
 
 ## Подготовка
 
+**Локальный показ** (на своём компьютере) — без пароля:
 ```bash
 docker compose down -v                                # чистая БД: демо-слои загрузятся заново
 SEED_ZONING_CHECK=false docker compose up --build -d  # → http://localhost:8088
+```
+
+**Публичный стенд** (по ссылке для внешних участников) — только через `demo.sh`, с паролем (basic auth, логин `demo`,
+пароль — в `secrets/demo-credentials.env`; как создать — README, «Демо-стенд»):
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml down -v
+SEED_ZONING_CHECK=false ./demo.sh                     # печатает ссылку *.trycloudflare.com
 ```
 
 `SEED_ZONING_CHECK=false` отключает начальную проверку зонирования, которую сидер иначе выполняет при первом старте.

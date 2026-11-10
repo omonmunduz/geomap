@@ -5,23 +5,26 @@
 
 ## Быстрый старт
 ```bash
-docker compose up --build      # → http://localhost:8088
+docker compose up --build      # → http://localhost:8088, без пароля
 ```
-Перед первым запуском создайте `secrets/htpasswd` (сайт закрыт basic auth, см. «Демо-стенд» ниже) — иначе Docker создаст
-на его месте пустую папку и nginx не стартует.
+Локальный запуск открыт без пароля. Basic auth включается только для публичного стенда — через `./demo.sh`
+(см. «Демо-стенд» ниже).
 
 Вход: «Войти» → «Войти через Infocom ID» → выбрать демо-учётную запись (вход эмулируется).
 
 ## Демо-стенд
-Публичная ссылка на стенд одной командой (Git Bash / Linux / macOS):
+Публичная ссылка на стенд одной командой (Git Bash / Linux / macOS), **только с паролем**:
 ```bash
 ./demo.sh
 ```
-Скрипт собирает и запускает `docker-compose.yml` (без `docker-compose.override.yml`: наружу открыт только :8088),
+Скрипт собирает и запускает `docker compose -f docker-compose.yml -f docker-compose.demo.yml` (без
+`docker-compose.override.yml`: наружу открыт только :8088). `docker-compose.demo.yml` подменяет конфиг nginx на
+`frontend/nginx.auth.conf` и монтирует `secrets/htpasswd`; без этого файла `demo.sh` останавливается с ошибкой. Скрипт
 ждёт `/actuator/health` = UP, поднимает туннель `cloudflared tunnel --url http://localhost:8088`, проверяет через
 полученную ссылку `/actuator/health` и векторный тайл и печатает ссылку. Если `cloudflared` падает, он перезапускается
 в цикле, и каждая новая ссылка с временем дописывается в `demo-url.txt` (в git не попадает). Ctrl+C закрывает туннель,
-контейнеры продолжают работать (`restart: unless-stopped`; `docker compose down` — остановить). Нужен `cloudflared` в PATH или в `%LOCALAPPDATA%\cloudflared\cloudflared.exe`
+контейнеры продолжают работать (`restart: unless-stopped`; остановить —
+`docker compose -f docker-compose.yml -f docker-compose.demo.yml down`). Нужен `cloudflared` в PATH или в `%LOCALAPPDATA%\cloudflared\cloudflared.exe`
 (`winget install Cloudflare.cloudflared`, `brew install cloudflared` или бинарник со страницы релизов
 github.com/cloudflare/cloudflared).
 
@@ -44,16 +47,16 @@ mkdir -p secrets
 PW=$(openssl rand -base64 18 | tr '+/' '-_')
 printf 'demo:%s\n' "$(openssl passwd -6 "$PW")" > secrets/htpasswd
 printf 'DEMO_USER=demo\nDEMO_PASSWORD=%s\n' "$PW" > secrets/demo-credentials.env
-docker compose restart frontend
+docker compose -f docker-compose.yml -f docker-compose.demo.yml restart frontend
 ```
 
-Как устроена защита: весь сайт закрыт basic auth. Запросы к `/api` с заголовком `Authorization: Bearer <JWT>`
+Как устроена защита (`frontend/nginx.auth.conf`): в демо-режиме весь сайт закрыт basic auth. Запросы к `/api` с заголовком `Authorization: Bearer <JWT>`
 (их шлёт приложение после демо-входа) пропускаются к backend без пароля — браузер не может отправить Basic и Bearer
 одновременно, — а backend проверяет подпись токена; получить токен без пароля нельзя.
 
 **Ссылка `*.trycloudflare.com` временная**: живёт, пока работает `demo.sh`, после перезапуска адрес другой; это
 тестовый сервис Cloudflare без гарантий доступности. Для постоянного стенда — VPS с Docker: тот же
-`docker compose -f docker-compose.yml up -d --build`, перед ним reverse proxy с TLS на своём домене (например, Caddy),
+`docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d --build`, перед ним reverse proxy с TLS на своём домене (например, Caddy),
 наружу только 80/443. Либо именованный Cloudflare Tunnel (`cloudflared tunnel create`, нужен аккаунт Cloudflare и домен)
 с постоянным адресом. В обоих случаях для настоящего показа стоит выключить демо-вход (`DEV_LOGIN=false`), когда
 появится реальный вход.

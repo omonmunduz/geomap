@@ -33,8 +33,6 @@ services:
     build: ./frontend
     restart: unless-stopped
     ports: ["8088:80"]
-    # basic auth: создайте secrets/htpasswd (не коммитится), см. demo.sh
-    volumes: ["./secrets/htpasswd:/etc/nginx/htpasswd:ro"]
     depends_on: [backend]
 
 volumes:
