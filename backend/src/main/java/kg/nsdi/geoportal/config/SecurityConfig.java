@@ -1,6 +1,8 @@
 package kg.nsdi.geoportal.config;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -19,6 +21,7 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Ролевая модель (ЧТЗ п. 5.1.1.6–5.1.1.7): anon / authorized / staff / admin.
@@ -27,12 +30,36 @@ import java.util.List;
  */
 @Configuration
 public class SecurityConfig {
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
+
+    /** Значения по умолчанию из application.yml и docker-compose.yml — публично известны, в рабочем режиме недопустимы. */
+    static final Set<String> DEFAULT_JWT_SECRETS = Set.of(
+            "dev-only-secret-change-me-in-production-0123456789",
+            "change-me-change-me-change-me-change-me-0123");
+    static final int MIN_JWT_SECRET_BYTES = 32;
 
     @Bean
     SecretKey jwtKey(AppProperties props) {
-        byte[] bytes = props.jwtSecret().getBytes(StandardCharsets.UTF_8);
-        if (bytes.length < 32) throw new IllegalStateException("app.jwt-secret must be at least 32 bytes");
-        return new SecretKeySpec(bytes, "HmacSHA256");
+        return new SecretKeySpec(checkJwtSecret(props.jwtSecret(), props.devLogin()), "HmacSHA256");
+    }
+
+    /**
+     * HS256 требует ключ не короче 32 байт. При выключенном демо-входе (DEV_LOGIN=false — рабочий режим)
+     * секрет по умолчанию тоже запрещён: им можно подписать токен администратора.
+     */
+    static byte[] checkJwtSecret(String secret, boolean devLogin) {
+        byte[] bytes = secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8);
+        String hint = " Задайте собственный JWT_SECRET не короче " + MIN_JWT_SECRET_BYTES + " байт, например: openssl rand -hex 32";
+        String error = null;
+        if (!devLogin && (secret == null || DEFAULT_JWT_SECRETS.contains(secret)))
+            error = "JWT_SECRET равен значению по умолчанию, а DEV_LOGIN=false: запуск остановлен.";
+        else if (bytes.length < MIN_JWT_SECRET_BYTES)
+            error = "JWT_SECRET короче " + MIN_JWT_SECRET_BYTES + " байт (" + bytes.length + "): запуск остановлен.";
+        if (error != null) {
+            log.error(error + hint);
+            throw new IllegalStateException(error + hint);
+        }
+        return bytes;
     }
 
     @Bean
