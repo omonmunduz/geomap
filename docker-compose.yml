@@ -2,6 +2,7 @@
 services:
   db:
     image: postgis/postgis:16-3.4
+    restart: unless-stopped
     environment:
       POSTGRES_DB: geoportal
       POSTGRES_USER: geo
@@ -16,18 +17,21 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    restart: unless-stopped
     environment:
       DB_HOST: db
       DB_PASSWORD: ${DB_PASSWORD:-geo}
       JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me-0123}
       DEV_LOGIN: ${DEV_LOGIN:-true}
       SEED_DEMO: ${SEED_DEMO:-true}
+      SEED_ZONING_CHECK: ${SEED_ZONING_CHECK:-true}
     volumes: [storage:/data]
     depends_on:
       db: { condition: service_healthy }
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     ports: ["8088:80"]
     depends_on: [backend]
 

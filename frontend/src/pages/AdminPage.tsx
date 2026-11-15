@@ -6,7 +6,7 @@ import { roleLabel } from '../components/Header'
 import { Spinner } from '../components/Modal'
 
 const ACTIONS: Record<string, string> = {
-  login: 'Вход', login_denied: 'Отказ во входе', layer_create: 'Создание слоя', layer_publish: 'Публикация слоя', layer_unpublish: 'Снятие с публикации',
+  login: 'Вход', logout: 'Выход', login_denied: 'Отказ во входе', layer_create: 'Создание слоя', layer_publish: 'Публикация слоя', layer_unpublish: 'Снятие с публикации',
   layer_rollback: 'Откат версии', layer_update: 'Изменение слоя', import_commit: 'Импорт данных', feature_create: 'Создание объекта',
   feature_update: 'Изменение объекта', feature_delete: 'Удаление объекта', zoning_check: 'Проверка зонирования',
   discrepancy_status: 'Статус расхождения', report_export: 'Выгрузка отчёта', user_update: 'Изменение пользователя', zoning_rules_update: 'Правила зонирования',

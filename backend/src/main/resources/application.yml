@@ -41,3 +41,5 @@ app:
   seed:
     enabled: ${SEED_DEMO:true}
     dir: ${SEED_DIR:../demo-data}
+    # false — без начальной проверки зонирования: на показе первый запуск даст 29 новых расхождений
+    zoning-check: ${SEED_ZONING_CHECK:true}

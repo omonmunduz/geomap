@@ -22,7 +22,9 @@ public class AdminController {
     public AdminController(JdbcTemplate db, AuditService audit, Json json) { this.db = db; this.audit = audit; this.json = json; }
 
     @GetMapping("/stats")
-    public Map<String, Object> stats() {
+    public Map<String, Object> stats(@RequestParam(required = false) String format) {
+        if (format != null && !"json".equalsIgnoreCase(format))
+            throw ApiException.bad("Неподдерживаемый формат «" + format + "»: сводная статистика выдаётся только в JSON");
         return Rows.camel(db.queryForMap("""
             SELECT (SELECT count(*) FROM core.users) AS users,
                    (SELECT count(*) FROM catalog.layers) AS layers,

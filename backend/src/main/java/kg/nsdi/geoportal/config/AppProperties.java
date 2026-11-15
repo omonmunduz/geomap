@@ -13,5 +13,6 @@ public record AppProperties(
 
     public record Gdal(String ogr2ogr, String ogrinfo, String pg, int timeoutSeconds) {}
 
-    public record Seed(boolean enabled, String dir) {}
+    /** zoningCheck — запускать ли начальную проверку зонирования по Бишкеку после наполнения (SEED_ZONING_CHECK). */
+    public record Seed(boolean enabled, String dir, boolean zoningCheck) {}
 }

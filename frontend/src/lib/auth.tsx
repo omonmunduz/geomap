@@ -24,7 +24,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(r.token)
     setUser(r.user)
   }
-  const logout = () => { setToken(null); setUser(null); location.hash = '#/map' }
+  const logout = () => {
+    api('/auth/logout', { method: 'POST' }).catch(() => {})   // запись в журнал; токен уже отправлен в заголовке
+    setToken(null); setUser(null); location.hash = '#/map'
+  }
   return <Ctx.Provider value={{ user, login, logout, ready }}>{children}</Ctx.Provider>
 }
 

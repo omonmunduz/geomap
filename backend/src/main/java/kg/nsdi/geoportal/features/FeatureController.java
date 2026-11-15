@@ -15,7 +15,8 @@ import java.util.*;
 
 /**
  * Карточка объекта и редактор геометрии (ЧТЗ п. 4.4.3, 4.4.6; FR-GIS-03).
- * Правки применяются к рабочей (draft) версии слоя; для оперативных слоёв — публикуются немедленно (п. 4.4.10).
+ * Правки применяются к рабочей (draft) версии слоя — при необходимости это копия опубликованной (copy-on-write);
+ * для оперативных слоёв — публикуются немедленно (п. 4.4.10).
  */
 @RestController
 public class FeatureController {
@@ -96,9 +97,13 @@ public class FeatureController {
         CurrentUser u = CurrentUser.require();
         UUID layerId = db.queryForObject("SELECT layer_id FROM spatial.features WHERE id=?", UUID.class, id);
         if (!layers.get(layerId).canEdit(u)) throw ApiException.forbidden("Нет доступа к истории объекта");
+        // история объекта во всех версиях слоя (копии объекта в черновиках связаны через origin_id)
         return db.queryForList("""
-            SELECT h.id, h.op, h.at, u.display_name AS author, h.attrs::text AS attrs
-            FROM spatial.feature_history h LEFT JOIN core.users u ON u.id=h.by_user WHERE h.feature_id=? ORDER BY h.at DESC""", id)
+            SELECT h.id, h.op, h.version, h.at, u.display_name AS author, h.attrs::text AS attrs
+            FROM spatial.feature_history h LEFT JOIN core.users u ON u.id=h.by_user
+            WHERE h.feature_id IN (SELECT c.id FROM spatial.features f JOIN spatial.features c ON c.layer_id=f.layer_id AND c.origin_id=f.origin_id
+                                   WHERE f.id=?)
+            ORDER BY h.at DESC""", id)
             .stream().map(r -> { var m = Rows.camel(r); m.put("attrs", json.tree((String) r.get("attrs"))); return m; }).toList();
     }
 
@@ -108,25 +113,19 @@ public class FeatureController {
     @Transactional
     public Map<String, Object> create(@PathVariable UUID layerId, @RequestBody FeatureInput in) {
         CurrentUser u = CurrentUser.require();
-        Layer l = layers.get(layerId);
+        Layer l = lockLayer(layerId);
         if (!l.canEdit(u)) throw ApiException.forbidden("Слой принадлежит другой организации");
         if (in.geometry() == null) throw ApiException.bad("Не задана геометрия");
         Map<String, Object> attrs = cleanAttrs(l, in.attrs(), true);
         String geo = json.write(in.geometry());
         validateGeometry(l, geo);
 
-        Integer version = l.draftVersion();
-        if (version == null) {
-            version = layers.nextVersion(layerId);
-            db.update("INSERT INTO catalog.layer_versions(layer_id,version,created_by,source,source_srid,feature_count,note) VALUES (?,?,?,?,4326,0,?)",
-                    layerId, version, u.id(), "редактор геометрии", "Создано вручную на карте");
-            db.update("UPDATE catalog.layers SET draft_version=? WHERE id=?", version, layerId);
-        }
+        int version = editableVersion(l, u);
         UUID id = db.queryForObject("""
             INSERT INTO spatial.features(layer_id,version,geom,attrs,title,created_by,updated_by)
             VALUES (?,?,ST_SetSRID(ST_GeomFromGeoJSON(?),4326),?::jsonb,?,?,?) RETURNING id""", UUID.class,
             layerId, version, geo, json.write(attrs), titleOf(l, attrs), u.id(), u.id());
-        history(id, layerId, "create", u.id());
+        history(id, layerId, "create", u.id(), version);
         afterEdit(l, version);
         audit.log(u, "feature_create", "feature", id, Map.of("layer", l.code()));
         return get(id);
@@ -136,9 +135,10 @@ public class FeatureController {
     @Transactional
     public Map<String, Object> update(@PathVariable UUID id, @RequestBody FeatureInput in) {
         CurrentUser u = CurrentUser.require();
-        Map<String, Object> f = db.queryForMap("SELECT layer_id, version, attrs::text AS attrs FROM spatial.features WHERE id=? AND NOT deleted", id);
-        Layer l = layers.get((UUID) f.get("layer_id"));
+        Layer l = lockLayer(db.queryForObject("SELECT layer_id FROM spatial.features WHERE id=?", UUID.class, id));
         if (!l.canEdit(u)) throw ApiException.forbidden("Слой принадлежит другой организации");
+        int version = editableVersion(l, u);
+        id = inVersion(id, version);
         if (in.geometry() != null) {
             String geo = json.write(in.geometry());
             validateGeometry(l, geo);
@@ -149,8 +149,8 @@ public class FeatureController {
             db.update("UPDATE spatial.features SET attrs=?::jsonb, title=? WHERE id=?", json.write(attrs), titleOf(l, attrs), id);
         }
         db.update("UPDATE spatial.features SET updated_at=now(), updated_by=? WHERE id=?", u.id(), id);
-        history(id, l.id(), "update", u.id());
-        afterEdit(l, (Integer) f.get("version"));
+        history(id, l.id(), "update", u.id(), version);
+        afterEdit(l, version);
         audit.log(u, "feature_update", "feature", id, Map.of("layer", l.code()));
         return get(id);
     }
@@ -159,25 +159,66 @@ public class FeatureController {
     @Transactional
     public Map<String, Object> delete(@PathVariable UUID id) {
         CurrentUser u = CurrentUser.require();
-        Map<String, Object> f = db.queryForMap("SELECT layer_id, version FROM spatial.features WHERE id=? AND NOT deleted", id);
-        Layer l = layers.get((UUID) f.get("layer_id"));
+        Layer l = lockLayer(db.queryForObject("SELECT layer_id FROM spatial.features WHERE id=?", UUID.class, id));
         if (!l.canEdit(u)) throw ApiException.forbidden("Слой принадлежит другой организации");
+        int version = editableVersion(l, u);
+        id = inVersion(id, version);
         db.update("UPDATE spatial.features SET deleted=true, updated_at=now(), updated_by=? WHERE id=?", u.id(), id);
-        history(id, l.id(), "delete", u.id());
-        afterEdit(l, (Integer) f.get("version"));
+        history(id, l.id(), "delete", u.id(), version);
+        afterEdit(l, version);
         audit.log(u, "feature_delete", "feature", id, Map.of("layer", l.code()));
         return Map.of("deleted", true);
     }
 
-    private void history(UUID featureId, UUID layerId, String op, UUID userId) {
-        db.update("INSERT INTO spatial.feature_history(feature_id,layer_id,op,geom,attrs,by_user) " +
-                  "SELECT id, layer_id, ?, geom, attrs, ? FROM spatial.features WHERE id=?", op, userId, featureId);
+    /** Блокировка строки слоя на время правки: два редактора не создадут два черновика. */
+    private Layer lockLayer(UUID layerId) {
+        db.query("SELECT id FROM catalog.layers WHERE id=? FOR UPDATE", rs -> null, layerId);
+        return layers.get(layerId);
+    }
+
+    /**
+     * Версия, в которую пишутся правки. Опубликованная версия неоперативного слоя не меняется:
+     * при первой правке создаётся черновик — копия опубликованных объектов (copy-on-write), он виден только редакторам
+     * до «Опубликовать». Оперативные слои (п. 4.4.10) по-прежнему правятся и публикуются сразу.
+     */
+    private int editableVersion(Layer l, CurrentUser u) {
+        Integer draft = l.draftVersion();
+        if (draft != null && (l.operational() || !draft.equals(l.publishedVersion()))) return draft;
+        int version = layers.nextVersion(l.id());
+        if (draft == null) {
+            db.update("INSERT INTO catalog.layer_versions(layer_id,version,created_by,source,source_srid,feature_count,note) VALUES (?,?,?,?,4326,0,?)",
+                    l.id(), version, u.id(), "редактор геометрии", "Создано вручную на карте");
+        } else {
+            db.update("INSERT INTO catalog.layer_versions(layer_id,version,created_by,source,source_srid,feature_count,note) VALUES (?,?,?,?,4326,0,?)",
+                    l.id(), version, u.id(), "редактор геометрии", "Черновик на основе v" + draft);
+            int n = db.update("""
+                INSERT INTO spatial.features(layer_id,version,geom,attrs,title,created_at,created_by,updated_at,updated_by,origin_id)
+                SELECT layer_id, ?, geom, attrs, title, created_at, created_by, updated_at, updated_by, origin_id
+                FROM spatial.features WHERE layer_id=? AND version=? AND NOT deleted""", version, l.id(), draft);
+            db.update("UPDATE catalog.layer_versions SET feature_count=? WHERE layer_id=? AND version=?", n, l.id(), version);
+        }
+        db.update("UPDATE catalog.layers SET draft_version=? WHERE id=?", version, l.id());
+        return version;
+    }
+
+    /** Объект в заданной версии слоя: сам объект или его копия в черновике (по origin_id). */
+    private UUID inVersion(UUID id, int version) {
+        List<UUID> r = db.queryForList("""
+            SELECT c.id FROM spatial.features f JOIN spatial.features c ON c.layer_id=f.layer_id AND c.origin_id=f.origin_id
+            WHERE f.id=? AND c.version=? AND NOT c.deleted""", UUID.class, id, version);
+        if (r.isEmpty()) throw ApiException.notFound("Объект в рабочей версии слоя");
+        return r.get(0);
+    }
+
+    private void history(UUID featureId, UUID layerId, String op, UUID userId, int version) {
+        db.update("INSERT INTO spatial.feature_history(feature_id,layer_id,op,geom,attrs,by_user,version) " +
+                  "SELECT id, layer_id, ?, geom, attrs, ?, ? FROM spatial.features WHERE id=?", op, userId, version, featureId);
         db.update("UPDATE catalog.layer_versions v SET feature_count=(SELECT count(*) FROM spatial.features f " +
                   "WHERE f.layer_id=v.layer_id AND f.version=v.version AND NOT f.deleted) " +
                   "WHERE v.layer_id=? AND v.version=(SELECT version FROM spatial.features WHERE id=?)", layerId, featureId);
     }
 
-    private void afterEdit(Layer l, Integer version) {
+    private void afterEdit(Layer l, int version) {
         if (l.operational()) db.update("UPDATE catalog.layers SET published_version=? WHERE id=?", version, l.id());
         layers.touch(l.id());
     }
