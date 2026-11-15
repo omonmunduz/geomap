@@ -1,3 +1,5 @@
+[![CI](https://github.com/omonmunduz/geomap/actions/workflows/ci.yml/badge.svg)](https://github.com/omonmunduz/geomap/actions/workflows/ci.yml)
+
 ## Быстрый старт
 ```bash
 docker compose up --build      # → http://localhost:8088, без пароля
@@ -63,6 +65,14 @@ cd backend && mvn spring-boot:run          # :8080 — миграции Flyway +
 cd frontend && npm install && npm run dev  # :5173, прокси /api → :8080
 ```
 
+## Тесты
+```bash
+cd backend && mvn verify   # нужны Docker (PostGIS в Testcontainers) и GDAL в PATH (apt install gdal-bin)
+cd frontend && npm run typecheck && npm run build
+```
+Без GDAL тесты бэкенда падают сразу с сообщением «Для тестов нужен GDAL». В CI (`.github/workflows/ci.yml`) то же
+выполняется на каждый push и pull request.
+
 ## Структура
 - `backend/` — Spring Boot 3 (Java 21): auth, catalog, tiles (MVT), imports (GDAL), search, zoning (+ отчёты XLSX/PDF), admin, audit; миграции в `src/main/resources/db/migration`
 - `frontend/` — React 18 + TypeScript + MapLibre GL
@@ -73,7 +83,7 @@ cd frontend && npm install && npm run dev  # :5173, прокси /api → :8080
 |---|---|---|
 | `SEED_DEMO` | `true` | загрузить демо-слои из `demo-data/` при первом старте (пустая БД) |
 | `SEED_ZONING_CHECK` | `true` | после загрузки выполнить начальную проверку зонирования по Бишкеку, чтобы реестр расхождений не был пустым. `false` — проверка не выполняется, и первый запуск на показе даёт 29 **новых** расхождений |
-| `DEV_LOGIN` | `true` | демо-вход без Infocom ID |
+| `DEV_LOGIN` | `true` | демо-вход без Infocom ID. При `false` бэкенд не стартует, если `JWT_SECRET` не задан, равен значению по умолчанию или короче 32 байт |
 
 Флаги сидера срабатывают только на пустой БД:
 ```bash
